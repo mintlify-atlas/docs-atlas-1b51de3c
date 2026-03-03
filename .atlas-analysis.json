@@ -1,0 +1,121 @@
+{
+  "projectType": "saas",
+  "projectName": "nteract Desktop",
+  "projectDescription": "A fast, modern desktop application for Jupyter notebooks with instant startup, realtime sync, and intelligent environment management",
+  "theme": "aspen",
+  "primaryColor": "#FF6E4A",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/daemon",
+              "concepts/environments",
+              "concepts/kernels",
+              "concepts/notebooks",
+              "concepts/sync"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/settings",
+              "guides/collaboration",
+              "guides/environment-management",
+              "guides/python-bindings",
+              "guides/widgets",
+              "guides/mcp-server",
+              "guides/logging"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/contributing",
+              "development/building",
+              "development/testing",
+              "development/architecture-deep-dive",
+              "development/release-process"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/overview",
+              "cli/notebook",
+              "cli/console",
+              "cli/daemon",
+              "cli/kernels",
+              "cli/environments"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Python Bindings",
+            "pages": [
+              "api/python/overview",
+              "api/python/session",
+              "api/python/async-session",
+              "api/python/execution-results"
+            ]
+          },
+          {
+            "group": "Daemon API",
+            "pages": [
+              "api/daemon/overview",
+              "api/daemon/ipc-protocol",
+              "api/daemon/blob-store"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Instant startup with prewarmed Python and Deno environments",
+    "Real-time notebook synchronization across multiple windows using CRDTs",
+    "Intelligent environment management with UV, Conda, and inline dependencies",
+    "Background daemon (runtimed) for persistent kernel and output management",
+    "CLI tools (runt) for notebook and kernel operations",
+    "Python bindings for programmatic notebook execution",
+    "Secure iframe isolation for untrusted output rendering",
+    "Native desktop app built with Tauri and React"
+  ],
+  "publicApiSurface": [
+    "runt notebook <path>",
+    "runt console",
+    "runt daemon [status|start|stop|logs]",
+    "runt notebooks",
+    "runt ps",
+    "runtimed.Session.start_kernel()",
+    "runtimed.Session.run(code)",
+    "runtimed.AsyncSession",
+    "Desktop application GUI",
+    "Daemon IPC protocol (Unix socket)",
+    "HTTP blob store API",
+    "Automerge CRDT document sync"
+  ]
+}
