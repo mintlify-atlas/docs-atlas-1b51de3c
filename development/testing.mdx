@@ -1,0 +1,611 @@
+---
+title: Testing
+description: Running tests and writing new test cases for nteract Desktop
+---
+
+nteract Desktop uses a comprehensive testing strategy covering unit tests, integration tests, and end-to-end tests.
+
+## Test Types
+
+| Type | Technology | Scope | Speed |
+|------|-----------|-------|-------|
+| **Unit Tests (Rust)** | cargo test | Pure logic, no I/O | Fast (~seconds) |
+| **Unit Tests (TypeScript)** | Vitest | Component logic | Fast (~seconds) |
+| **E2E Tests** | WebdriverIO + Mocha | Full application flows | Slow (~minutes) |
+
+## Running Tests
+
+### Quick Test Suite
+
+```bash
+# Run all Rust tests
+cargo test
+
+# Run all TypeScript tests
+pnpm test:run
+```
+
+### Rust Unit Tests
+
+```bash
+# All tests
+cargo test
+
+# Specific package
+cargo test -p notebook
+cargo test -p runtimed
+
+# Specific test
+cargo test test_find_pyproject
+
+# With output
+cargo test -- --nocapture
+
+# Run tests in parallel (default)
+cargo test
+
+# Run tests serially
+cargo test -- --test-threads=1
+```
+
+### TypeScript Unit Tests
+
+```bash
+# Run all tests
+pnpm test:run
+
+# Watch mode (re-run on changes)
+pnpm test
+
+# Specific test file
+pnpm test:run src/components/Cell.test.tsx
+```
+
+## End-to-End Testing
+
+nteract Desktop uses WebdriverIO to drive the Tauri app through the W3C WebDriver protocol.
+
+### Modes
+
+**Native mode (macOS):** Built-in WebDriver server. No Docker needed.
+
+**Docker mode (Linux/CI):** Uses `tauri-driver` + `webkit2gtk-driver` in a container.
+
+### Running E2E Tests (macOS)
+
+The `e2e/dev.sh` script handles everything:
+
+<Steps>
+  <Step title="Full cycle (build + start + test)">
+    ```bash
+    ./e2e/dev.sh cycle
+    ```
+    
+    This builds the app with WebDriver support, starts it, runs the smoke test, and stops it.
+  </Step>
+  
+  <Step title="Step by step">
+    ```bash
+    # Build with WebDriver support
+    ./e2e/dev.sh build
+    
+    # Start app with WebDriver server (foreground)
+    ./e2e/dev.sh start
+    
+    # In another terminal: Run tests
+    ./e2e/dev.sh test        # Smoke test only
+    ./e2e/dev.sh test all    # All non-fixture specs
+    
+    # Stop the app
+    ./e2e/dev.sh stop
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+**Important:** Use `./e2e/dev.sh build` instead of plain `cargo build`. The Tauri build embeds frontend assets into the binary.
+</Warning>
+
+### Fixture Tests
+
+Fixture tests open a specific notebook and get a fresh app instance per test:
+
+```bash
+# Run a single fixture test
+./e2e/dev.sh test-fixture \
+  crates/notebook/fixtures/audit-test/1-vanilla.ipynb \
+  e2e/specs/vanilla-startup.spec.js
+
+# Run all fixture tests (fresh app per test)
+./e2e/dev.sh test-fixtures
+```
+
+### E2E Test Types
+
+**Regular tests** run against whatever notebook the app opens by default. They share a single app instance during `./e2e/dev.sh test all`.
+
+**Fixture tests** require a specific notebook (`NOTEBOOK_PATH` env var) and get a fresh app instance per test.
+
+Use a fixture test when:
+- The test needs specific pre-populated cell content
+- The test needs a clean app state
+- The test exercises features tied to notebook content (deps panel, trust dialog, environment detection)
+
+Use a regular test when:
+- The test creates its own cells
+- The test is about general UI behavior (cell operations, keyboard shortcuts, markdown editing)
+
+### dev.sh Command Reference
+
+| Command | Description |
+|---------|-------------|
+| `build` | Rebuild Rust binary (incremental, embeds frontend) |
+| `build-full` | Full rebuild (frontend + sidecars + Rust) |
+| `start` | Start app with WebDriver server (foreground) |
+| `stop` | Stop the running app |
+| `restart` | Stop + start |
+| `test [spec\|all]` | Run E2E tests (default: smoke test only) |
+| `test-fixture <nb> <spec>` | Run a fixture test (fresh app per test) |
+| `test-fixtures` | Run all fixture tests |
+| `cycle` | Build + start + test in one shot |
+| `status` | Check if WebDriver server is running |
+| `session` | Create a session and print ID |
+| `exec 'js'` | Execute JS in the app |
+
+### Running E2E Tests (Docker)
+
+```bash
+# Run all tests in Docker
+pnpm test:e2e:docker
+
+# Interactive debugging shell
+docker compose --profile dev run --rm tauri-e2e-shell
+```
+
+## Writing Tests
+
+### Writing Rust Unit Tests
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_dependencies() {
+        let deps = vec!["pandas".to_string(), "numpy".to_string()];
+        let result = parse_dependencies(&deps);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_async_function() {
+        let result = fetch_data().await;
+        assert!(result.is_ok());
+    }
+}
+```
+
+### Writing TypeScript Unit Tests
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { Cell } from './Cell';
+
+describe('Cell', () => {
+  it('renders code cell', () => {
+    render(<Cell type="code" />);
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
+});
+```
+
+### Writing E2E Tests
+
+#### Regular Test Example
+
+```javascript
+/**
+ * E2E Test: Cell Execution (Regular)
+ * 
+ * Tests basic cell execution flow.
+ */
+import { browser, expect } from "@wdio/globals";
+import { waitForKernelReady, setupCodeCell, typeSlowly } from "../helpers.js";
+
+describe("Cell Execution", () => {
+  before(async () => {
+    await waitForKernelReady();
+  });
+
+  it("should execute a code cell", async () => {
+    const cell = await setupCodeCell();
+    await typeSlowly('print("hello")');
+    await browser.keys(["Shift", "Enter"]);
+
+    await browser.waitUntil(async () => {
+      const output = await $('[data-slot="ansi-stream-output"]');
+      return output.isExisting();
+    }, { timeout: 30000 });
+
+    const text = await $('[data-slot="ansi-stream-output"]').getText();
+    expect(text).toContain("hello");
+  });
+});
+```
+
+#### Fixture Test Example
+
+```javascript
+/**
+ * E2E Test: UV Inline Dependencies (Fixture)
+ * 
+ * Tests UV inline dependency resolution and installation.
+ * 
+ * Requires: NOTEBOOK_PATH=crates/notebook/fixtures/audit-test/2-uv-inline.ipynb
+ */
+import { browser, expect } from "@wdio/globals";
+import { waitForAppReady, approveTrustDialog } from "../helpers.js";
+
+describe("UV Inline Dependencies", () => {
+  before(async () => {
+    await waitForAppReady();
+  });
+
+  it("should show trust dialog for inline deps", async () => {
+    const dialog = await $('[data-testid="trust-dialog"]');
+    await dialog.waitForExist({ timeout: 5000 });
+    expect(await dialog.isDisplayed()).toBe(true);
+  });
+
+  it("should install deps after approval", async () => {
+    await approveTrustDialog();
+    
+    await browser.waitUntil(async () => {
+      const status = await getKernelStatus();
+      return status === "idle";
+    }, { timeout: 120000 });
+  });
+});
+```
+
+### Adding a New Fixture Test
+
+<Steps>
+  <Step title="Choose or create a fixture notebook">
+    Use an existing notebook in `crates/notebook/fixtures/audit-test/` or create a new one.
+  </Step>
+  
+  <Step title="Create the spec file">
+    Create `e2e/specs/my-feature.spec.js`:
+    
+    ```javascript
+    /**
+     * E2E Test: My Feature (Fixture)
+     *
+     * Description of what this tests.
+     *
+     * Requires: NOTEBOOK_PATH=crates/notebook/fixtures/audit-test/1-vanilla.ipynb
+     */
+    import { browser, expect } from "@wdio/globals";
+    import { waitForAppReady } from "../helpers.js";
+
+    describe("My Feature", () => {
+      before(async () => {
+        await waitForAppReady();
+      });
+
+      it("should do the thing", async () => {
+        // ...
+      });
+    });
+    ```
+  </Step>
+  
+  <Step title="Add to FIXTURE_SPECS in wdio.conf.js">
+    ```javascript
+    const FIXTURE_SPECS = [
+      // ... existing entries
+      "my-feature.spec.js",
+    ];
+    ```
+  </Step>
+  
+  <Step title="Add to test-fixtures in e2e/dev.sh">
+    ```bash
+    $0 test-fixture \
+      crates/notebook/fixtures/audit-test/1-vanilla.ipynb \
+      e2e/specs/my-feature.spec.js || FAIL=1
+    ```
+  </Step>
+  
+  <Step title="Verify locally">
+    ```bash
+    ./e2e/dev.sh build
+    ./e2e/dev.sh test-fixture \
+      crates/notebook/fixtures/audit-test/1-vanilla.ipynb \
+      e2e/specs/my-feature.spec.js
+    ```
+  </Step>
+</Steps>
+
+## E2E Test Helpers
+
+Import from `e2e/helpers.js`:
+
+```javascript
+import {
+  waitForAppReady,
+  waitForKernelReady,
+  executeFirstCell,
+  waitForCellOutput,
+  typeSlowly,
+  setupCodeCell,
+} from "../helpers.js";
+```
+
+| Helper | What it does |
+|--------|-------------|
+| `waitForAppReady()` | Waits for the toolbar to appear (15s). Use in every `before()` hook. |
+| `waitForKernelReady()` | Waits for kernel to reach `idle` or `busy` (30s). Superset of `waitForAppReady()`. |
+| `executeFirstCell()` | Focuses the first code cell's editor and hits Shift+Enter. Returns the cell element. |
+| `waitForCellOutput(cell, timeout?)` | Waits for stream output to appear in a cell. Returns the text. |
+| `waitForOutputContaining(cell, text, timeout?)` | Waits for stream output containing specific text. Returns the full text. |
+| `waitForErrorOutput(cell, timeout?)` | Waits for error output to appear. Returns the text. |
+| `approveTrustDialog(timeout?)` | Waits for the trust dialog and clicks "Trust & Install". |
+| `getKernelStatus()` | Returns the current kernel status string (e.g., `"idle"`, `"busy"`, `"starting"`). |
+| `waitForKernelStatus(status, timeout?)` | Waits for the kernel to reach a specific status. |
+| `typeSlowly(text, delay?)` | Types character-by-character (30ms default). Use for CodeMirror input. |
+| `setupCodeCell()` | Finds or creates a code cell, focuses editor, selects all. Returns the cell. |
+
+## Test Selectors
+
+Always use `data-testid` attributes for reliable element selection:
+
+### Common Selectors
+
+| Selector | Element |
+|----------|---------||
+| `[data-testid="notebook-toolbar"]` | Main toolbar |
+| `[data-testid="save-button"]` | Save notebook |
+| `[data-testid="add-code-cell-button"]` | Add code cell |
+| `[data-testid="start-kernel-button"]` | Start kernel |
+| `[data-testid="restart-kernel-button"]` | Restart kernel |
+| `[data-testid="interrupt-kernel-button"]` | Interrupt kernel |
+| `[data-testid="run-all-button"]` | Run all cells |
+| `[data-testid="execute-button"]` | Run cell button |
+| `[data-testid="deps-panel"]` | UV deps panel |
+| `[data-testid="conda-deps-panel"]` | Conda deps panel |
+| `[data-testid="trust-dialog"]` | Trust dialog overlay |
+| `[data-slot="ansi-stream-output"]` | Stream output |
+| `[data-slot="ansi-error-output"]` | Error output |
+| `[data-cell-type="code"]` | Code cell container |
+| `.cm-content[contenteditable="true"]` | CodeMirror editor |
+
+### Adding New Test IDs
+
+Always add `data-testid` for interactive elements:
+
+```tsx
+<button
+  onClick={handleClick}
+  data-testid="my-feature-button"
+>
+  Click me
+</button>
+```
+
+Naming: kebab-case, specific (`cell-delete-button` not `delete`).
+
+## WebDriver Quirks (wry)
+
+The Tauri WebView engine has some important limitations:
+
+### Text Selectors Don't Work
+
+```javascript
+// BAD — returns broken element reference
+const button = await $("button*=Code");
+await button.click(); // "Malformed type for elementId parameter"
+
+// GOOD — use data-testid
+const button = await $('[data-testid="add-code-cell-button"]');
+await button.click();
+```
+
+### browser.switchToFrame() Doesn't Work
+
+wry doesn't support switching iframe context. Use the postMessage eval channel instead:
+
+```javascript
+async function evalInIframe(code, timeout = 10000) {
+  await browser.execute((code) => {
+    window.__iframeEvalResult = undefined;
+    window.__iframeEvalDone = false;
+
+    window.addEventListener("message", function handler(event) {
+      if (event.data?.type === "eval_result") {
+        window.__iframeEvalResult = event.data.payload;
+        window.__iframeEvalDone = true;
+        window.removeEventListener("message", handler);
+      }
+    });
+
+    const iframe = document.querySelector('iframe[title="Isolated output frame"]');
+    iframe?.contentWindow?.postMessage(
+      { type: "eval", payload: { code } }, "*"
+    );
+  }, code);
+
+  await browser.waitUntil(
+    async () => await browser.execute(() => window.__iframeEvalDone === true),
+    { timeout }
+  );
+
+  return await browser.execute(() => window.__iframeEvalResult);
+}
+```
+
+### browser.executeAsync() Not Supported
+
+Use `browser.execute()` + `browser.waitUntil()` polling instead:
+
+```javascript
+// BAD — 404 in wry
+const result = await browser.executeAsync((done) => {
+  setTimeout(() => done("value"), 100);
+});
+
+// GOOD — polling pattern
+await browser.execute(() => {
+  window.__myResult = undefined;
+  setTimeout(() => { window.__myResult = "value"; }, 100);
+});
+await browser.waitUntil(
+  async () => await browser.execute(() => window.__myResult !== undefined),
+  { timeout: 5000 }
+);
+const result = await browser.execute(() => window.__myResult);
+```
+
+## Test Design Patterns
+
+### Daemon-Independent Testing
+
+Some features interact with the global daemon. The daemon may override default values on mount.
+
+**Rule: Never assert initial state. Always click first, then assert the result.**
+
+```javascript
+// BAD — fragile: daemon may have already set theme
+it("should start with system theme", async () => {
+  const theme = await getThemeSetting();
+  expect(theme).toBe("system"); // fails if daemon set it to "dark"
+});
+
+// GOOD — tests the observable effect of an action
+it("should apply dark class when clicking Dark", async () => {
+  // Click Dark (regardless of initial state)
+  await browser.execute(() => {
+    const buttons = document.querySelectorAll('[data-testid="settings-theme-group"] button');
+    for (const btn of buttons) {
+      if (btn.textContent?.includes("Dark")) {
+        btn.click();
+        break;
+      }
+    }
+  });
+
+  // Assert the observable DOM effect
+  await browser.waitUntil(async () => {
+    return await browser.execute(() =>
+      document.documentElement.classList.contains("dark")
+    );
+  });
+});
+```
+
+### Typing into CodeMirror
+
+Always use `typeSlowly()`. CodeMirror drops characters with fast bulk input:
+
+```javascript
+import { typeSlowly, setupCodeCell } from "../helpers.js";
+
+const cell = await setupCodeCell();
+await typeSlowly('print("hello")');
+await browser.keys(["Shift", "Enter"]);
+```
+
+## Timeout Guidelines
+
+| Operation | Timeout | Notes |
+|-----------|---------|-------|
+| App load (`waitForAppReady`) | 15s | Toolbar mounting |
+| Kernel startup (`waitForKernelReady`) | 30s | First kernel start can be slow |
+| Cell execution | 120s (default) | Environment creation on first run |
+| Element appear | 5s | DOM rendering |
+| Button clickable | 5s | React hydration |
+| Synchronous DOM effects | 2-3s | React re-renders, no I/O |
+
+## Debugging Tests
+
+### Log Progress
+
+```javascript
+console.log("Step completed:", someValue);
+```
+
+### Inspect Page State
+
+```javascript
+console.log("Title:", await browser.getTitle());
+const html = await browser.getPageSource();
+```
+
+### Run Arbitrary JS
+
+```javascript
+const result = await browser.execute(() => {
+  return document.querySelector('[data-cell-type]')?.outerHTML;
+});
+```
+
+### Pause to Observe
+
+```javascript
+await browser.pause(5000);
+```
+
+### dev.sh Shortcuts
+
+```bash
+# Quick JS evaluation
+./e2e/dev.sh exec 'return document.title'
+
+# Check if WebDriver is up
+./e2e/dev.sh status
+```
+
+## Troubleshooting
+
+### "E2E binary not found"
+
+The WebDriver-enabled binary hasn't been built yet:
+
+```bash
+./e2e/dev.sh build       # Fast: recompiles Rust only
+./e2e/dev.sh build-full  # Full: rebuilds frontend + Rust
+```
+
+### "No WebDriver server on port 4444"
+
+You ran `./e2e/dev.sh test` without starting the app first:
+
+```bash
+# Terminal 1
+./e2e/dev.sh start
+
+# Terminal 2
+./e2e/dev.sh test
+```
+
+Or use `./e2e/dev.sh cycle` to build + start + test in one shot.
+
+### Flaky Tests
+
+- Use `waitUntil()` for async conditions, never `pause()`
+- Use `typeSlowly()` for CodeMirror input
+- Use `data-testid` selectors instead of text selectors
+- Follow the daemon-independent pattern for settings tests
+
+## CI Testing
+
+Tests run automatically on every push and PR via GitHub Actions. See `.github/workflows/build.yml` for the full CI configuration.
+
+## Next Steps
+
+- [Building from Source](/development/building) - Set up your development environment
+- [Architecture Deep Dive](/development/architecture-deep-dive) - Understand the system design
+- [Contributing Guidelines](/development/contributing) - Contribution workflow

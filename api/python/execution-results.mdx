@@ -1,0 +1,409 @@
+---
+title: ExecutionResult & Output Types
+description: Understanding execution results and output handling
+---
+
+When you execute code via `Session` or `AsyncSession`, you receive an `ExecutionResult` object containing outputs, success status, and execution metadata.
+
+## ExecutionResult
+
+The primary result type returned by `execute_cell()` and `run()`.
+
+### Properties
+
+<ResponseField name="cell_id" type="str">
+  ID of the cell that was executed.
+</ResponseField>
+
+<ResponseField name="outputs" type="List[Output]">
+  All outputs from execution (streams, display data, errors).
+</ResponseField>
+
+<ResponseField name="success" type="bool">
+  `True` if execution completed without error, `False` if an error occurred.
+</ResponseField>
+
+<ResponseField name="execution_count" type="int | None">
+  Execution counter value from the kernel, or `None` if not available.
+</ResponseField>
+
+### Computed Properties
+
+<ResponseField name="stdout" type="str">
+  Combined stdout text from all stream outputs.
+</ResponseField>
+
+<ResponseField name="stderr" type="str">
+  Combined stderr text from all stream outputs.
+</ResponseField>
+
+<ResponseField name="display_data" type="List[Output]">
+  List of display data and execute result outputs.
+</ResponseField>
+
+<ResponseField name="error" type="Output | None">
+  The first error output, or `None` if no error occurred.
+</ResponseField>
+
+### Basic Usage
+
+```python
+import runtimed
+
+with runtimed.Session() as session:
+    session.start_kernel()
+    
+    # Execute code
+    result = session.run("print('hello')")
+    
+    # Check status
+    print(result.success)         # True
+    print(result.execution_count) # 1
+    
+    # Access outputs
+    print(result.stdout)          # "hello\n"
+    print(len(result.outputs))    # 1
+```
+
+### Error Handling
+
+```python
+result = session.run("raise ValueError('oops')")
+
+print(result.success)  # False
+
+if result.error:
+    print(f"Error: {result.error.ename}")   # "ValueError"
+    print(f"Message: {result.error.evalue}") # "oops"
+    for line in result.error.traceback:
+        print(line)
+```
+
+## Output
+
+Individual output from cell execution. Each output has a type and type-specific fields.
+
+### Properties
+
+<ResponseField name="output_type" type="str">
+  Output type: `"stream"`, `"display_data"`, `"execute_result"`, or `"error"`.
+</ResponseField>
+
+### Stream Outputs
+
+For `output_type == "stream"`:
+
+<ResponseField name="name" type="str">
+  Stream name: `"stdout"` or `"stderr"`.
+</ResponseField>
+
+<ResponseField name="text" type="str">
+  The text content.
+</ResponseField>
+
+```python
+for output in result.outputs:
+    if output.output_type == "stream":
+        print(f"{output.name}: {output.text}")
+```
+
+### Display Data Outputs
+
+For `output_type == "display_data"` or `output_type == "execute_result"`:
+
+<ResponseField name="data" type="Dict[str, str]">
+  Dictionary mapping MIME types to content.
+  
+  Common MIME types:
+  - `text/plain`: Plain text representation
+  - `text/html`: HTML content
+  - `image/png`: Base64-encoded PNG image
+  - `application/json`: JSON data
+</ResponseField>
+
+<ResponseField name="execution_count" type="int | None">
+  Execution count (only for `execute_result` outputs).
+</ResponseField>
+
+```python
+result = session.run("42")
+
+for output in result.display_data:
+    if "text/plain" in output.data:
+        print(output.data["text/plain"])  # "42"
+```
+
+### Error Outputs
+
+For `output_type == "error"`:
+
+<ResponseField name="ename" type="str">
+  Exception class name (e.g., `"ValueError"`, `"TypeError"`).
+</ResponseField>
+
+<ResponseField name="evalue" type="str">
+  Exception message.
+</ResponseField>
+
+<ResponseField name="traceback" type="List[str]">
+  List of traceback lines (ANSI-formatted).
+</ResponseField>
+
+```python
+result = session.run("1 / 0")
+
+if result.error:
+    print(f"Exception: {result.error.ename}")    # "ZeroDivisionError"
+    print(f"Message: {result.error.evalue}")     # "division by zero"
+    print(f"Traceback has {len(result.error.traceback)} lines")
+```
+
+## Cell
+
+Represents a cell in the automerge document.
+
+### Properties
+
+<ResponseField name="id" type="str">
+  Cell identifier (e.g., `"cell-a1b2c3d4-..."`).
+</ResponseField>
+
+<ResponseField name="cell_type" type="str">
+  Cell type: `"code"`, `"markdown"`, or `"raw"`.
+</ResponseField>
+
+<ResponseField name="source" type="str">
+  Cell source code or content.
+</ResponseField>
+
+<ResponseField name="execution_count" type="int | None">
+  Execution count if the cell has been executed, or `None`.
+</ResponseField>
+
+### Usage
+
+```python
+cell = session.get_cell(cell_id)
+
+print(f"ID: {cell.id}")
+print(f"Type: {cell.cell_type}")
+print(f"Source: {cell.source}")
+print(f"Executed: {cell.execution_count is not None}")
+```
+
+## Complete Examples
+
+### Processing Multiple Output Types
+
+```python
+import runtimed
+
+with runtimed.Session() as session:
+    session.start_kernel()
+    
+    # Execute code with multiple outputs
+    code = """
+import matplotlib.pyplot as plt
+print("Generating plot...")
+plt.plot([1, 2, 3, 4])
+plt.show()
+print("Done")
+"""
+    
+    result = session.run(code)
+    
+    # Process each output type
+    for output in result.outputs:
+        if output.output_type == "stream":
+            print(f"[{output.name}] {output.text}")
+        
+        elif output.output_type == "display_data":
+            print(f"Display output with MIME types: {list(output.data.keys())}")
+            if "image/png" in output.data:
+                # Save the image
+                import base64
+                png_data = base64.b64decode(output.data["image/png"])
+                with open("plot.png", "wb") as f:
+                    f.write(png_data)
+        
+        elif output.output_type == "error":
+            print(f"Error: {output.ename}: {output.evalue}")
+```
+
+### Checking Execution Success
+
+```python
+import runtimed
+
+with runtimed.Session() as session:
+    session.start_kernel()
+    
+    cells_to_run = [
+        "import pandas as pd",
+        "df = pd.DataFrame({'a': [1, 2, 3]})",
+        "print(df.sum())"
+    ]
+    
+    for code in cells_to_run:
+        result = session.run(code)
+        
+        if not result.success:
+            print(f"Execution failed: {code}")
+            if result.error:
+                print(f"  Error: {result.error.ename}: {result.error.evalue}")
+            break
+        
+        if result.stdout:
+            print(f"Output: {result.stdout}")
+```
+
+### Async Output Processing
+
+```python
+import asyncio
+import runtimed
+
+async def run_and_process(session, code):
+    result = await session.run(code)
+    
+    return {
+        "code": code,
+        "success": result.success,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "execution_count": result.execution_count
+    }
+
+async def main():
+    async with runtimed.AsyncSession() as session:
+        await session.start_kernel()
+        
+        # Run multiple cells in parallel
+        tasks = [
+            run_and_process(session, "print('Task 1')"),
+            run_and_process(session, "print('Task 2')"),
+            run_and_process(session, "print('Task 3')")
+        ]
+        
+        results = await asyncio.gather(*tasks)
+        
+        for result in results:
+            print(f"Code: {result['code']}")
+            print(f"  Success: {result['success']}")
+            print(f"  Output: {result['stdout']}")
+
+asyncio.run(main())
+```
+
+## Working with Display Data
+
+### Extracting Specific MIME Types
+
+```python
+result = session.run("""
+import pandas as pd
+df = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
+df
+""")
+
+# Get the table as HTML
+for output in result.display_data:
+    if "text/html" in output.data:
+        html = output.data["text/html"]
+        with open("table.html", "w") as f:
+            f.write(html)
+    
+    if "text/plain" in output.data:
+        print(output.data["text/plain"])
+```
+
+### Handling Rich Outputs
+
+```python
+import base64
+from pathlib import Path
+
+def save_display_outputs(result, output_dir="outputs"):
+    """Save all display outputs to files."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True)
+    
+    for i, output in enumerate(result.display_data):
+        for mime_type, content in output.data.items():
+            if mime_type == "image/png":
+                png_data = base64.b64decode(content)
+                (output_dir / f"output_{i}.png").write_bytes(png_data)
+            
+            elif mime_type == "text/html":
+                (output_dir / f"output_{i}.html").write_text(content)
+            
+            elif mime_type == "application/json":
+                (output_dir / f"output_{i}.json").write_text(content)
+
+# Usage
+result = session.run("plt.plot([1,2,3]); plt.show()")
+save_display_outputs(result)
+```
+
+## Error Details
+
+### Accessing Traceback Information
+
+```python
+result = session.run("""
+def divide(a, b):
+    return a / b
+
+divide(10, 0)
+""")
+
+if result.error:
+    print("Error occurred:")
+    print(f"  Type: {result.error.ename}")
+    print(f"  Message: {result.error.evalue}")
+    print("\nTraceback:")
+    for line in result.error.traceback:
+        # Traceback lines include ANSI color codes
+        print(line)
+```
+
+### Custom Error Handling
+
+```python
+def execute_with_retry(session, code, max_retries=3):
+    """Execute code with retry on specific errors."""
+    for attempt in range(max_retries):
+        result = session.run(code)
+        
+        if result.success:
+            return result
+        
+        if result.error:
+            # Don't retry on syntax errors
+            if result.error.ename == "SyntaxError":
+                raise RuntimeError(f"Syntax error: {result.error.evalue}")
+            
+            # Retry on other errors
+            print(f"Attempt {attempt + 1} failed: {result.error.ename}")
+            if attempt == max_retries - 1:
+                raise RuntimeError(f"Max retries exceeded: {result.error.evalue}")
+    
+    return result
+
+# Usage
+try:
+    result = execute_with_retry(session, "import flaky_module")
+except RuntimeError as e:
+    print(f"Failed: {e}")
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="Session API" icon="code" href="/api/python/session">
+    Synchronous session methods
+  </Card>
+  <Card title="AsyncSession API" icon="bolt" href="/api/python/async-session">
+    Async session methods
+  </Card>
+</CardGroup>

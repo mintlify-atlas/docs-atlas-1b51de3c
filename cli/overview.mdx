@@ -1,0 +1,110 @@
+---
+title: CLI Overview
+description: Command-line interface for nteract Desktop
+---
+
+The `runt` command-line tool provides utilities for managing notebooks, kernels, and the background daemon.
+
+## Installation
+
+The CLI is bundled with the nteract Desktop app. After installing nteract, the `runt` command is available in your PATH.
+
+<Note>
+On macOS, the CLI is located at `/Applications/nteract.app/Contents/MacOS/runt`. The installer automatically adds this to your PATH.
+</Note>
+
+## Quick Start
+
+<CodeGroup>
+```bash Open a notebook
+runt notebook path/to/notebook.ipynb
+```
+
+```bash Launch interactive console
+runt console
+```
+
+```bash List open notebooks
+runt notebooks
+```
+
+```bash Check daemon status
+runt daemon status
+```
+</CodeGroup>
+
+## Command Structure
+
+The CLI is organized into subcommands:
+
+| Command | Description |
+|---------|-------------|
+| `runt notebook` | Open the notebook application |
+| `runt console` | Launch an interactive Jupyter console |
+| `runt notebooks` | List open notebooks with kernel info |
+| `runt daemon` | Daemon service management |
+| `runt jupyter` | Standalone kernel management |
+| `runt shutdown` | Shutdown a notebook's kernel |
+
+## Global Options
+
+Most commands support:
+
+- `--json` — Output results in JSON format
+- `--help` — Show help for the command
+
+## Usage Examples
+
+### Open a notebook
+
+```bash
+# Open an existing notebook
+runt notebook analysis.ipynb
+
+# Open with specific runtime
+runt notebook --runtime python new.ipynb
+runt notebook --runtime deno script.ipynb
+```
+
+### List open notebooks
+
+```
+$ runt notebooks
+╭──────────────────────────────────────┬────────┬──────────────┬────────┬───────╮
+│ NOTEBOOK                             │ KERNEL │ ENV          │ STATUS │ PEERS │
+├──────────────────────────────────────┼────────┼──────────────┼────────┼───────┤
+│ ~/notebooks/blobstore.ipynb          │ python │ uv:inline    │ idle   │ 1     │
+│ d4c441d3-d862-4ab0-afe6-ff9145cc2f3d │ python │ uv:prewarmed │ idle   │ 1     │
+╰──────────────────────────────────────┴────────┴──────────────┴────────┴───────╯
+```
+
+### Check daemon health
+
+```bash
+runt daemon status
+runt daemon logs -f
+```
+
+## Exit Codes
+
+Commands return standard exit codes:
+
+- `0` — Success
+- `1` — Error (daemon not running, kernel not found, etc.)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Notebook Command" icon="notebook" href="/cli/notebook">
+    Launch notebooks and manage the desktop app
+  </Card>
+  <Card title="Console Command" icon="terminal" href="/cli/console">
+    Interactive REPL for Jupyter kernels
+  </Card>
+  <Card title="Daemon Commands" icon="server" href="/cli/daemon">
+    Service management and troubleshooting
+  </Card>
+  <Card title="Kernel Management" icon="microchip" href="/cli/kernels">
+    Standalone kernel lifecycle commands
+  </Card>
+</CardGroup>

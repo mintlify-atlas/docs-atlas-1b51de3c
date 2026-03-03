@@ -1,0 +1,325 @@
+---
+title: Daemon
+description: The runtimed background daemon that powers nteract Desktop
+---
+
+The `runtimed` daemon is a long-lived background process that owns the heavy, stateful parts of the notebook experience. It prewarms environments, manages kernel processes, handles document sync, and serves output blobs.
+
+## Vision
+
+Notebook windows become thin views: they subscribe to a CRDT document, render output from a blob store, and send execution requests. When the last window closes, the daemon keeps kernels alive and outputs safe. When a new window opens, it catches up instantly.
+
+## Architecture Layers
+
+### Environment Pool
+
+Two pools (UV and Conda) with configurable target sizes (default: 3 environments each). Background warming loops replenish environments as they're consumed.
+
+**UV environments**: 
+- Created with `uv venv` + `uv pip install ipykernel ipywidgets`
+- Default packages from settings applied
+- Warmup script triggers `.pyc` compilation
+- Stored in `~/.cache/runt/envs/runtimed-uv-{uuid}/`
+
+**Conda environments**:
+- Uses rattler (Rust-native conda) for dependency solving
+- Repodata fetch, dependency solving, package installation
+- Same default packages as UV
+- Stored in `~/.cache/runt/envs/runtimed-conda-{uuid}/`
+
+<Info>
+Stale environments (>2 days old) are automatically pruned on startup.
+</Info>
+
+### CRDT Sync Layer
+
+Real-time state synchronization across notebook windows using Automerge.
+
+**Settings sync**: A single Automerge document shared by all windows covering user preferences:
+
+```
+ROOT/
+  theme: "system"
+  default_runtime: "python"
+  default_python_env: "uv"
+  uv/
+    default_packages: ["numpy", "pandas"]
+  conda/
+    default_packages: ["scipy"]
+```
+
+**Notebook sync**: Each open notebook gets a "room" with a canonical document:
+
+```
+ROOT/
+  notebook_id: Str
+  cells/
+    [i]/
+      id: Str                   # cell UUID
+      cell_type: Str            # "code" | "markdown" | "raw"
+      source: Text              # Automerge Text CRDT
+      execution_count: Str
+      outputs/                  # List of manifest hashes
+        [j]: Str
+  metadata/
+    runtime: Str
+```
+
+<Note>
+Cell `source` uses Automerge's `Text` type for proper concurrent edit merging with character-level resolution.
+</Note>
+
+### Blob Store
+
+Content-addressed storage for output data. The blob store is a generic CAS that stores bytes with a media type.
+
+**On-disk layout**:
+```
+~/.cache/runt/blobs/
+  a1/
+    b2c3d4e5f6...           # raw bytes
+    b2c3d4e5f6....meta      # JSON metadata sidecar
+```
+
+**Metadata sidecar example**:
+```json
+{
+  "media_type": "image/png",
+  "size": 45000,
+  "created_at": "2026-02-23T12:00:00Z"
+}
+```
+
+**Properties**:
+- SHA-256 hashing over raw bytes
+- Atomic writes via temp file + rename
+- 100 MB size limit per blob
+- Two-character prefix directories prevent filesystem bottlenecks
+
+### HTTP Blob Server
+
+Minimal HTTP server on `127.0.0.1:0` (random port) serving blobs:
+
+**`GET /blob/{hash}`**:
+- Returns raw bytes with `Content-Type` from metadata
+- `Cache-Control: public, max-age=31536000, immutable`
+- `Access-Control-Allow-Origin: *`
+- Content and metadata fetched concurrently
+
+**`GET /health`**: Returns 200 OK
+
+Port is advertised in `daemon.json` via `DaemonInfo.blob_port`.
+
+<Warning>
+**Security model**: Writes require daemon socket access (filesystem permissions). Reads are unauthenticated HTTP on localhost (safe because content-addressed with 256-bit hashes).
+</Warning>
+
+### Kernel Manager
+
+Owns kernel processes and the output pipeline (when `daemon_execution` is enabled).
+
+**Flow**:
+```
+Notebook window (thin view)
+  +-- sends LaunchKernel/QueueCell/RunAll to daemon
+  +-- receives broadcasts (KernelStatus, Output, ExecutionStarted)
+  +-- syncs cell source via Automerge
+  +-- renders outputs from Automerge doc
+
+runtimed (daemon)
+  +-- owns kernel process per notebook room
+  +-- subscribes to ZMQ iopub
+  +-- writes outputs to Automerge doc
+  +-- broadcasts real-time events to all windows
+  +-- auto-detects project files for environment selection
+```
+
+**Dual-channel design**:
+
+| Channel | Purpose | Persisted? |
+|---------|---------|------------|
+| Automerge Sync | Document state (cells, source, outputs) | Yes |
+| Broadcasts | Real-time events (status, outputs) | No |
+
+Automerge provides persistence and late-joiner sync. Broadcasts provide sub-50ms UI updates during execution.
+
+## Singleton Management
+
+Only one daemon runs per user. File-based locking ensures mutual exclusion.
+
+**Lock mechanism**:
+- Lock file: `~/.cache/runt/daemon.lock`
+- Info file: `~/.cache/runt/daemon.json`
+
+**DaemonInfo structure**:
+```rust
+pub struct DaemonInfo {
+    pub endpoint: String,
+    pub pid: u32,
+    pub version: String,
+    pub started_at: DateTime<Utc>,
+    pub blob_port: Option<u16>,
+    pub worktree_path: Option<String>,        // dev mode only
+    pub workspace_description: Option<String>, // dev mode only
+}
+```
+
+## IPC Protocol
+
+Length-prefixed binary framing over a single Unix socket (Unix) or named pipe (Windows).
+
+### Request Types
+
+| Request | Response | Purpose |
+|---------|----------|----------|
+| `Take { env_type }` | `Env { ... }` or `Empty` | Acquire a prewarmed env |
+| `Return { env }` | `Returned` | Give an env back to the pool |
+| `Status` | `Stats { ... }` | Pool metrics |
+| `Ping` | `Pong` | Health check |
+| `Shutdown` | `ShuttingDown` | Graceful stop |
+| `FlushPool` | `Flushed` | Drain and rebuild all envs |
+| `InspectNotebook { notebook_id }` | `NotebookState { ... }` | Debug notebook sync state |
+| `ListRooms` | `RoomsList { rooms }` | List active notebook sync rooms |
+
+### Settings File Watcher
+
+The daemon watches `~/.config/nteract/settings.json` for external edits:
+
+1. Changes are debounced (500ms)
+2. Applied to the Automerge settings doc
+3. Persisted as Automerge binary (not back to JSON)
+4. Broadcast to all connected sync clients
+
+<Info>
+This allows external tools to modify settings while preserving CRDT semantics.
+</Info>
+
+## Room Architecture
+
+Each open notebook gets a "room" in the daemon for multi-window sync.
+
+```rust
+pub struct NotebookRoom {
+    pub doc: Arc<RwLock<NotebookDoc>>,
+    pub changed_tx: broadcast::Sender<()>,
+    pub persist_path: PathBuf,
+    pub active_peers: AtomicUsize,
+}
+```
+
+**Room lifecycle**:
+
+1. **First window opens** → daemon acquires room via `get_or_create_room()`, loading persisted doc from disk (or creating fresh)
+2. **Client sends handshake** → `Handshake::NotebookSync { notebook_id }`, then exchanges Automerge sync messages
+3. **Additional windows join** → same room, incrementing `active_peers`
+4. **Changes from any peer** → applied under write lock → persisted to disk → broadcast to all other peers
+5. **Last peer disconnects** → `active_peers` hits 0 → room evicted from map (doc already on disk)
+
+**Persistence**: Documents saved to `~/.cache/runt/notebook-docs/{sha256(notebook_id)}.automerge`
+
+<Note>
+SHA-256 hashing sanitizes notebook IDs (which may be file paths with special characters) into safe filenames.
+</Note>
+
+**Corrupt document recovery**: If a persisted `.automerge` file can't be loaded, it's renamed to `.automerge.corrupt` and a fresh document is created.
+
+## Auto-Upgrade
+
+The client detects version mismatches between the running daemon and the app binary:
+
+1. Check `daemon.json` version
+2. Compare with app's embedded version
+3. If mismatch, replace daemon binary and restart
+
+This ensures the daemon stays in sync with app updates.
+
+## Development Mode
+
+In development (Conductor workspaces), each worktree gets an isolated daemon:
+
+- State stored in `~/.cache/runt/worktrees/{hash}/`
+- Separate socket, lock, logs, and pools
+- `CONDUCTOR_WORKSPACE_PATH` environment variable enables isolation
+
+**Start dev daemon**:
+```bash
+cargo xtask dev-daemon
+```
+
+**Check status**:
+```bash
+./target/debug/runt daemon status
+```
+
+## Monitoring
+
+<Accordion title="Check daemon status">
+```bash
+runt daemon status
+```
+
+Shows:
+- Daemon version and uptime
+- UV and Conda pool sizes (available/warming/target)
+- Active notebook rooms
+- Blob server port
+</Accordion>
+
+<Accordion title="View logs">
+```bash
+runt daemon logs -f
+```
+
+Logs include:
+- Pool warming activity
+- Environment creation/cleanup
+- Sync protocol messages
+- Kernel lifecycle events
+</Accordion>
+
+<Accordion title="List active notebooks">
+```bash
+runt notebooks
+```
+
+Shows all open notebooks with:
+- Notebook path or ID
+- Kernel type
+- Environment source
+- Kernel status
+- Number of connected peers
+</Accordion>
+
+## Benefits
+
+<CardGroup cols={2}>
+  <Card title="Instant Startup" icon="rocket">
+    Prewarmed environments make notebook opening nearly instantaneous.
+  </Card>
+  <Card title="Persistent Kernels" icon="clock">
+    Kernels survive window closes. Reopen and continue where you left off.
+  </Card>
+  <Card title="Resource Sharing" icon="share-nodes">
+    All notebook windows share the same environment pool.
+  </Card>
+  <Card title="Multi-Window Sync" icon="window-restore">
+    Edit the same notebook in multiple windows with real-time sync.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environments" href="/concepts/environments" icon="box">
+    Learn about environment management
+  </Card>
+  <Card title="Synchronization" href="/concepts/sync" icon="arrows-rotate">
+    Understand CRDT-based sync
+  </Card>
+  <Card title="Kernels" href="/concepts/kernels" icon="microchip">
+    Explore kernel lifecycle
+  </Card>
+  <Card title="Architecture" href="/concepts/architecture" icon="diagram-project">
+    View overall system architecture
+  </Card>
+</CardGroup>

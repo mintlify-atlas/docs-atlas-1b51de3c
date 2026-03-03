@@ -1,0 +1,205 @@
+---
+title: Python Bindings Overview
+description: Programmatic access to the notebook daemon via Python
+---
+
+The `runtimed` Python package provides programmatic access to the notebook daemon. Use it to execute code, manage kernels, and interact with notebooks from Python scripts, agents, or automation workflows.
+
+## Installation
+
+<CodeGroup>
+
+```bash PyPI
+pip install runtimed
+```
+
+```bash From Source
+cd python/runtimed
+uv run maturin develop
+```
+
+</CodeGroup>
+
+## Quick Start
+
+<Tabs>
+  <Tab title="Synchronous API">
+    ```python
+    import runtimed
+
+    # Execute code with automatic kernel management
+    with runtimed.Session() as session:
+        session.start_kernel()
+        result = session.run("print('hello')")
+        print(result.stdout)  # "hello\n"
+    ```
+  </Tab>
+
+  <Tab title="Async API">
+    ```python
+    import asyncio
+    import runtimed
+
+    async def main():
+        async with runtimed.AsyncSession() as session:
+            await session.start_kernel()
+            result = await session.run("print('hello async')")
+            print(result.stdout)  # "hello async\n"
+
+    asyncio.run(main())
+    ```
+  </Tab>
+</Tabs>
+
+## Core Concepts
+
+### Document-First Execution
+
+Sessions use a **document-first model** where cells are stored in an Automerge document. This enables multi-client synchronization:
+
+```python
+# Create a cell in the document
+cell_id = session.create_cell("x = 10")
+
+# Update cell source
+session.set_source(cell_id, "x = 20")
+
+# Execute by cell ID (daemon reads source from document)
+result = session.execute_cell(cell_id)
+
+# Read cell state
+cell = session.get_cell(cell_id)
+print(cell.source)           # "x = 20"
+print(cell.execution_count)  # 1
+```
+
+### Session Isolation
+
+Each session connects to a unique "virtual notebook" room in the daemon. Sessions are isolated from each other but can share kernels if they use the same `notebook_id`.
+
+<Info>
+Multiple sessions with the same `notebook_id` share the same kernel and document state. This enables Python scripts to interact with notebooks open in the app.
+</Info>
+
+## API Classes
+
+<CardGroup cols={2}>
+  <Card title="Session" icon="code" href="/api/python/session">
+    Synchronous session for executing code
+  </Card>
+  <Card title="AsyncSession" icon="bolt" href="/api/python/async-session">
+    Async session for concurrent workflows
+  </Card>
+  <Card title="ExecutionResult" icon="chart-line" href="/api/python/execution-results">
+    Output handling and result types
+  </Card>
+  <Card title="DaemonClient" icon="server" href="#daemon-operations">
+    Low-level daemon operations
+  </Card>
+</CardGroup>
+
+## Multi-Client Scenarios
+
+Two sessions with the same `notebook_id` share the same kernel and document:
+
+```python
+# Session 1 creates a cell and executes
+s1 = runtimed.Session(notebook_id="shared")
+s1.connect()
+s1.start_kernel()
+cell_id = s1.create_cell("x = 42")
+s1.execute_cell(cell_id)
+
+# Session 2 sees the cell and shares the kernel
+s2 = runtimed.Session(notebook_id="shared")
+s2.connect()
+s2.start_kernel()  # Reuses existing kernel
+
+cells = s2.get_cells()
+assert any(c.id == cell_id for c in cells)
+
+# Execute in s2, result visible to s1
+cell_id2 = s2.create_cell("print(x)")
+s2.execute_cell(cell_id2)  # Uses x=42 from s1's execution
+```
+
+This enables:
+- Multiple Python processes sharing a notebook
+- Python scripts interacting with notebooks open in the app
+- Agent workflows with parallel execution
+
+## Daemon Operations
+
+The `DaemonClient` class provides low-level access to daemon operations:
+
+```python
+client = runtimed.DaemonClient()
+
+# Health checks
+client.ping()         # True if daemon responding
+client.is_running()   # True if daemon process exists
+
+# Pool status
+stats = client.status()
+# {
+#   'uv_available': 2,
+#   'conda_available': 0,
+#   'uv_warming': 1,
+#   'conda_warming': 0
+# }
+
+# Active notebook rooms
+rooms = client.list_rooms()
+# [
+#   {
+#     'notebook_id': 'my-notebook',
+#     'active_peers': 2,
+#     'has_kernel': True,
+#     'kernel_type': 'python',
+#     'kernel_status': 'idle',
+#     'env_source': 'uv:prewarmed'
+#   }
+# ]
+
+# Operations
+client.flush_pool()   # Clear and rebuild environment pool
+client.shutdown()     # Stop the daemon
+```
+
+## Error Handling
+
+All errors raise `RuntimedError`:
+
+```python
+try:
+    session.execute_cell("nonexistent-cell-id")
+except runtimed.RuntimedError as e:
+    print(f"Error: {e}")  # "Cell not found: nonexistent-cell-id"
+```
+
+<Warning>
+Common error scenarios:
+- Connection to daemon fails
+- Kernel not started before execution
+- Cell not found
+- Execution timeout
+- Kernel errors
+</Warning>
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `CONDUCTOR_WORKSPACE_PATH` | Use dev daemon for this worktree |
+| `RUNTIMED_SOCKET_PATH` | Override daemon socket path |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Session API" icon="code" href="/api/python/session">
+    Learn about synchronous session methods
+  </Card>
+  <Card title="AsyncSession API" icon="bolt" href="/api/python/async-session">
+    Explore async workflows
+  </Card>
+</CardGroup>

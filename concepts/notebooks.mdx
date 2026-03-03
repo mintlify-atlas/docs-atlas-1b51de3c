@@ -1,0 +1,539 @@
+---
+title: Notebooks
+description: Notebook format, structure, and handling in nteract Desktop
+---
+
+Notebooks in nteract Desktop follow the standard Jupyter notebook format (nbformat v4) with extensions for environment management and synchronization.
+
+## Notebook Format
+
+Notebooks are JSON files with the `.ipynb` extension following the nbformat specification.
+
+### Basic Structure
+
+```json
+{
+  "cells": [
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {},
+      "source": ["print('hello world')"],
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": ["hello world\n"]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": ["# Heading"]
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3",
+      "language": "python"
+    },
+    "language_info": {
+      "name": "python",
+      "version": "3.12.0"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}
+```
+
+## Cell Types
+
+### Code Cells
+
+Executable code with input and output.
+
+```json
+{
+  "cell_type": "code",
+  "execution_count": 1,
+  "metadata": {},
+  "source": ["import numpy as np", "np.random.rand(5)"],
+  "outputs": [...]
+}
+```
+
+**Fields**:
+- `execution_count`: Number assigned when cell executes (null if never executed)
+- `source`: Array of source code lines
+- `outputs`: Array of output objects
+- `metadata`: Cell-specific metadata
+
+### Markdown Cells
+
+Formatted text using Markdown syntax.
+
+```json
+{
+  "cell_type": "markdown",
+  "metadata": {},
+  "source": [
+    "# Title\n",
+    "\n",
+    "This is **bold** and this is *italic*."
+  ]
+}
+```
+
+**Rendering**: Markdown is parsed and rendered as HTML in the notebook UI.
+
+### Raw Cells
+
+Unformatted text passed through unchanged.
+
+```json
+{
+  "cell_type": "raw",
+  "metadata": {},
+  "source": ["Raw text"]
+}
+```
+
+**Use cases**: LaTeX source, custom formats, text that shouldn't be interpreted.
+
+## Output Format
+
+Code cells can produce multiple types of outputs:
+
+### Stream Output
+
+Stdout and stderr text streams.
+
+```json
+{
+  "output_type": "stream",
+  "name": "stdout",
+  "text": ["Line 1\n", "Line 2\n"]
+}
+```
+
+**Names**: `stdout` or `stderr`
+
+### Display Data
+
+Rich media outputs (images, HTML, etc.).
+
+```json
+{
+  "output_type": "display_data",
+  "data": {
+    "text/plain": "<matplotlib figure>",
+    "image/png": "iVBORw0KGgoAAAANS..."
+  },
+  "metadata": {
+    "image/png": {
+      "width": 640,
+      "height": 480
+    }
+  }
+}
+```
+
+**MIME bundle**: Multiple representations of the same output. Renderer chooses the best match.
+
+### Execute Result
+
+Return value of the executed code.
+
+```json
+{
+  "output_type": "execute_result",
+  "execution_count": 1,
+  "data": {
+    "text/plain": "42"
+  },
+  "metadata": {}
+}
+```
+
+**Difference from display_data**: Represents the cell's return value, not an explicit display call.
+
+### Error Output
+
+Exception tracebacks.
+
+```json
+{
+  "output_type": "error",
+  "ename": "ValueError",
+  "evalue": "invalid literal for int()",
+  "traceback": [
+    "Traceback (most recent call last):",
+    "  File \"<stdin>\", line 1, in <module>",
+    "ValueError: invalid literal for int()"
+  ]
+}
+```
+
+**ANSI colors**: Traceback lines may contain ANSI color codes for syntax highlighting.
+
+## Metadata Extensions
+
+nteract Desktop extends notebook metadata for environment and sync management.
+
+### Environment Configuration
+
+```json
+{
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3",
+      "language": "python"
+    },
+    "runt": {
+      "schema_version": "1",
+      "env_id": "550e8400-e29b-41d4-a716-446655440000"
+    },
+    "uv": {
+      "dependencies": ["pandas", "numpy>=2.0"],
+      "requires-python": ">=3.10"
+    },
+    "conda": {
+      "dependencies": ["scipy"],
+      "channels": ["conda-forge"],
+      "python": "3.12"
+    }
+  }
+}
+```
+
+**Fields**:
+- `runt.env_id`: Per-notebook identifier for environment isolation
+- `uv.dependencies`: UV/pip package specifications
+- `conda.dependencies`: Conda package specifications
+- `conda.channels`: Conda channel priority
+
+<Info>
+Inline dependencies make notebooks fully portable. Anyone opening the notebook gets the same environment.
+</Info>
+
+### Trust Signature
+
+Dependencies are signed to prevent untrusted code execution:
+
+```json
+{
+  "metadata": {
+    "runt": {
+      "trust_signature": "hmac-sha256:a1b2c3d4e5f6..."
+    }
+  }
+}
+```
+
+The signature covers `metadata.uv` and `metadata.conda` using a per-machine HMAC key.
+
+### Widget State
+
+ipywidgets state for restoring interactive controls:
+
+```json
+{
+  "metadata": {
+    "widgets": {
+      "application/vnd.jupyter.widget-state+json": {
+        "state": {
+          "widget-id": {
+            "model_name": "IntSliderModel",
+            "model_module": "@jupyter-widgets/controls",
+            "state": {"value": 50}
+          }
+        },
+        "version_major": 2,
+        "version_minor": 0
+      }
+    }
+  }
+}
+```
+
+## Notebook State in Memory
+
+While the `.ipynb` file is the durable format, nteract Desktop maintains notebook state in an Automerge CRDT document for multi-window sync.
+
+### Automerge Document Schema
+
+```
+ROOT/
+  notebook_id: Str
+  cells/                        <- List of Map
+    [i]/
+      id: Str                   <- cell UUID
+      cell_type: Str            <- "code" | "markdown" | "raw"
+      source: Text              <- Automerge Text CRDT
+      execution_count: Str      <- JSON-encoded i32 or "null"
+      outputs/                  <- List of Str
+        [j]: Str                <- Output manifest hash or JSON
+  metadata/
+    runtime: Str
+```
+
+**Key differences from .ipynb**:
+- `source` uses Automerge `Text` type for character-level concurrent editing
+- `outputs` are manifest hashes (or inline JSON in older notebooks)
+- Cell `id` is the primary identifier (stable across moves)
+
+### Cell Source Editing
+
+When you edit cell source:
+
+1. **Local edit** → Update Automerge Text CRDT
+2. **Myers diff** → Generate minimal character-level patch
+3. **Sync to daemon** → Send Automerge sync message
+4. **Daemon persists** → Write to `~/.cache/runt/notebook-docs/{hash}.automerge`
+5. **Broadcast to peers** → All other windows receive the change
+6. **Merge conflicts** → Automerge automatically resolves concurrent edits
+
+<Note>
+Automerge uses operational transformation (OT) semantics for text, ensuring that concurrent edits from multiple users merge correctly without conflicts.
+</Note>
+
+## Output Storage
+
+nteract Desktop uses a two-level system for outputs to avoid bloating the CRDT.
+
+### Output Manifests
+
+Outputs are described by manifests that reference content:
+
+```json
+{
+  "output_type": "display_data",
+  "data": {
+    "text/plain": {"inline": "Red Pixel"},
+    "image/png": {"blob": "a1b2c3d4...", "size": 45000}
+  },
+  "metadata": {
+    "image/png": {"width": 640, "height": 480}
+  }
+}
+```
+
+### ContentRef
+
+Content can be inlined or referenced:
+
+```rust
+pub enum ContentRef {
+    Inline { inline: String },
+    Blob { blob: String, size: u64 },
+}
+```
+
+**Inlining threshold**: 8 KB
+- Below → inline in manifest
+- Above → store in blob store
+
+### Blob Store
+
+Content-addressed storage at `~/.cache/runt/blobs/`:
+
+```
+blobs/
+  a1/
+    b2c3d4e5f6...           # raw bytes
+    b2c3d4e5f6....meta      # JSON metadata
+```
+
+**Benefits**:
+- Outputs don't bloat Automerge sync
+- Clearing outputs removes hashes, not large data
+- Deduplication (same image used in multiple cells)
+
+## File Operations
+
+### Opening a Notebook
+
+1. **Read .ipynb file** → Parse JSON
+2. **Load into Automerge** → Populate cells, source, metadata
+3. **Import outputs** → Construct manifests, store blobs if needed
+4. **Connect to room** → Join notebook sync room in daemon
+5. **Sync from peers** → Receive any changes from other windows
+
+### Saving a Notebook
+
+1. **Read from Automerge** → Get current cell state
+2. **Resolve outputs** → Fetch manifests, inline or decode blobs
+3. **Serialize to JSON** → Construct valid nbformat structure
+4. **Write .ipynb file** → Atomic write (temp file + rename)
+5. **Preserve metadata** → Unknown keys are passed through unchanged
+
+<Info>
+The `.ipynb` file is always a valid Jupyter notebook. The blob store is an optimization, not a dependency.
+</Info>
+
+### Auto-Save
+
+When enabled, notebooks are automatically saved at intervals:
+
+- **Default interval**: 2 minutes
+- **Trigger**: Cell execution, content changes
+- **Debouncing**: Rapid changes are batched
+
+## Metadata Preservation
+
+nteract Desktop preserves unknown metadata keys during round-trips:
+
+**Input notebook**:
+```json
+{
+  "metadata": {
+    "custom_tool": {"version": "1.0"},
+    "kernelspec": {...}
+  }
+}
+```
+
+**After load/save**:
+```json
+{
+  "metadata": {
+    "custom_tool": {"version": "1.0"},  // Preserved
+    "kernelspec": {...},
+    "runt": {...}  // Added by nteract
+  }
+}
+```
+
+This ensures compatibility with other Jupyter tools.
+
+## Notebook Migration
+
+### From Jupyter Lab/Classic
+
+Notebooks created in other Jupyter environments work directly:
+
+1. Open the `.ipynb` file
+2. nteract reads existing outputs and displays them
+3. First execution may prompt for dependency trust
+4. Save writes back valid nbformat
+
+### Schema Versioning
+
+The Automerge schema has a version field:
+
+```
+ROOT/
+  schema_version: "1"
+```
+
+**Current versions**:
+- `"1"` — Initial schema with inline JSON outputs
+- `"2"` — Output manifest hashes (when implemented)
+
+Readers handle both versions with branching logic.
+
+## Best Practices
+
+<Accordion title="Keep notebooks under version control">
+Notebooks are JSON text files that work well with Git:
+
+```bash
+git add notebook.ipynb
+git commit -m "Add data analysis"
+```
+
+**Tip**: Consider using `nbstripout` to remove outputs before committing for cleaner diffs.
+</Accordion>
+
+<Accordion title="Use inline dependencies for portability">
+Inline dependencies make notebooks self-contained:
+
+1. Add packages via dependency panel
+2. Commit the notebook with metadata
+3. Share the file — recipients get the same environment
+
+No external `requirements.txt` or `environment.yml` needed.
+</Accordion>
+
+<Accordion title="Save before sharing">
+Unsaved changes exist only in the Automerge document:
+
+1. Make edits
+2. Execute cells
+3. **Save** (Cmd+S / Ctrl+S)
+4. Share the `.ipynb` file
+
+Without saving, recipients won't see your latest changes.
+</Accordion>
+
+<Accordion title="Clear sensitive outputs">
+Outputs are stored in the notebook file:
+
+```json
+{
+  "outputs": [
+    {"output_type": "stream", "text": ["API_KEY=secret123\n"]}
+  ]
+}
+```
+
+Clear outputs before committing if they contain secrets:
+1. Edit → Clear All Outputs
+2. Save
+3. Commit
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Notebook won't open">
+**Symptoms**: Error message or blank screen when opening
+
+**Causes**:
+- Corrupted JSON
+- Invalid nbformat version
+- Missing required fields
+
+**Solution**:
+1. Open in a text editor
+2. Validate JSON syntax
+3. Check `nbformat` field is 4
+4. Ensure `cells` array exists
+</Accordion>
+
+<Accordion title="Changes not syncing between windows">
+**Check**:
+1. Both windows connected to daemon (`runt daemon status`)
+2. Same `notebook_id` (check daemon logs)
+3. Network/IPC not blocked
+
+**Workaround**: Save in one window, close and reopen in the other.
+</Accordion>
+
+<Accordion title="Outputs missing after save">
+**Cause**: Blob store cleared but notebook still references blobs
+
+**Solution**: Re-execute cells to regenerate outputs, then save.
+
+**Prevention**: Don't manually delete `~/.cache/runt/blobs/` while notebooks are open.
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Synchronization" href="/concepts/sync" icon="arrows-rotate">
+    Learn about CRDT-based sync
+  </Card>
+  <Card title="Kernels" href="/concepts/kernels" icon="microchip">
+    Understand kernel execution
+  </Card>
+  <Card title="Environments" href="/concepts/environments" icon="box">
+    Manage dependencies
+  </Card>
+  <Card title="Architecture" href="/concepts/architecture" icon="diagram-project">
+    View system overview
+  </Card>
+</CardGroup>

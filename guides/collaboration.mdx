@@ -1,0 +1,165 @@
+---
+title: Multi-Window Collaboration
+description: Work on the same notebook across multiple windows with real-time sync
+---
+
+nteract Desktop supports multi-window collaboration where multiple notebook windows can connect to the same notebook session, sharing both the document state and the kernel.
+
+## How It Works
+
+Each notebook is identified by a unique notebook ID. When multiple windows open the same notebook, they:
+
+- Share the same **kernel** (variables, state, execution context)
+- Share the same **document** via Automerge CRDT sync
+- See changes in real-time as other windows edit and execute cells
+
+<Note>
+This enables workflows like having a main editing window and a separate output viewer, or multiple collaborators working on the same notebook locally.
+</Note>
+
+## Opening the Same Notebook in Multiple Windows
+
+<Steps>
+  <Step title="Open first window">
+    Open a notebook normally with **File > Open** or **Cmd+O**
+  </Step>
+  <Step title="Open second window">
+    Open the same notebook file again with **File > Open** - nteract Desktop automatically detects that this notebook is already open and connects to the existing session
+  </Step>
+  <Step title="Start collaborating">
+    Both windows now share the same kernel and document. Changes in one window appear instantly in the other.
+  </Step>
+</Steps>
+
+## What Gets Shared
+
+### Document State (via Automerge CRDT)
+
+- Cell contents (code and markdown)
+- Cell order and structure
+- Cell execution counts
+- Cell outputs
+- Notebook metadata (kernelspec, dependencies, etc.)
+
+### Kernel State
+
+- All defined variables and imports
+- Execution history and context
+- Running computations
+
+When you execute a cell in one window, the execution count updates in all connected windows. Variables defined in one window are available in all other windows sharing the kernel.
+
+## Use Cases
+
+### Split Editor and Output Viewer
+
+Have one window for editing code and another for viewing outputs and visualizations.
+
+### Parallel Analysis
+
+Multiple team members can explore the same dataset with the same kernel, seeing each other's work in real-time.
+
+### Remote Sidecar
+
+Run the notebook app on a remote machine and view outputs locally using the sidecar viewer.
+
+## Kernel Management
+
+<Note>
+Only one kernel runs per notebook, regardless of how many windows are connected.
+</Note>
+
+### Starting a Kernel
+
+- If you start a kernel in any window, it becomes available to all connected windows
+- The kernel lifecycle is managed by the daemon, not individual windows
+
+### Interrupting and Restarting
+
+- Interrupt from any window stops execution for all windows
+- Restart from any window restarts the shared kernel
+
+### Shutdown
+
+- Closing a window doesn't stop the kernel if other windows are still connected
+- The kernel shuts down when all windows close or when explicitly shut down
+
+## Sync Behavior
+
+### Real-Time Updates
+
+Changes propagate through the daemon using Automerge, which provides:
+
+- **Conflict-free merging:** Multiple users can edit different parts of the notebook simultaneously
+- **Eventual consistency:** All windows converge to the same state
+- **Operation-based sync:** Only changes are transmitted, not entire documents
+
+### Network Isolation
+
+Currently, multi-window collaboration is **local only** — all windows must be on the same machine, connected to the same runtimed daemon.
+
+<Warning>
+Remote collaboration (across different machines) is not yet supported. All collaborating windows must connect to the same local daemon.
+</Warning>
+
+## Programmatic Collaboration
+
+You can also connect to notebooks programmatically using the Python bindings:
+
+```python
+import runtimed
+
+# Session 1: Create and execute a cell
+s1 = runtimed.Session(notebook_id="shared-notebook")
+s1.connect()
+s1.start_kernel()
+cell_id = s1.create_cell("x = 42")
+s1.execute_cell(cell_id)
+
+# Session 2: Share the same kernel and document
+s2 = runtimed.Session(notebook_id="shared-notebook")
+s2.connect()
+s2.start_kernel()  # Reuses existing kernel
+
+# s2 can see cells from s1
+cells = s2.get_cells()
+assert any(c.id == cell_id for c in cells)
+
+# Execute in s2, using variables from s1
+cell_id2 = s2.create_cell("print(x)")
+result = s2.execute_cell(cell_id2)
+print(result.stdout)  # "42\n"
+```
+
+This enables:
+
+- Python scripts interacting with notebooks open in the app
+- Agent workflows with parallel execution
+- Multiple Python processes sharing a notebook
+
+See the [Python Bindings guide](/guides/python-bindings) for more details.
+
+## Troubleshooting
+
+### Changes Not Syncing
+
+If changes in one window don't appear in another:
+
+1. Check that both windows are connected to the daemon: `runt daemon status`
+2. Verify both windows opened the same file path (different paths = different notebooks)
+3. Check daemon logs for sync errors: `runt daemon logs -f`
+
+### Kernel Not Shared
+
+If each window has its own kernel:
+
+- This indicates the windows are connected to different notebook IDs
+- Close all windows and reopen the same file to ensure they connect to the same session
+
+### Performance Issues
+
+With many connected windows, large notebooks may experience slower sync times. Consider:
+
+- Closing unnecessary windows
+- Splitting large notebooks into smaller files
+- Clearing old cell outputs to reduce document size

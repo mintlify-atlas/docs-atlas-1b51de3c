@@ -1,0 +1,328 @@
+---
+title: Contributing Guidelines
+description: How to contribute to nteract Desktop development
+---
+
+Welcome to nteract Desktop! This guide will help you get started with contributing to the project.
+
+## Code of Conduct
+
+Be respectful, constructive, and collaborative. We're all here to build great software together.
+
+## Getting Started
+
+Before you start coding, familiarize yourself with:
+
+- **Architecture** - Read [Architecture Deep Dive](/development/architecture-deep-dive) to understand the system design
+- **Building** - Follow [Building from Source](/development/building) to set up your environment
+- **Testing** - Learn [Testing](/development/testing) to run and write tests
+
+## Code Formatting (Required)
+
+Run these commands **before every commit**. CI will reject PRs that fail formatting checks.
+
+<CodeGroup>
+```bash Rust
+cargo fmt
+```
+
+```bash TypeScript/JavaScript
+npx @biomejs/biome check --fix apps/notebook/src/ e2e/
+```
+</CodeGroup>
+
+<Warning>
+There are no pre-commit hooks. You must run these manually.
+</Warning>
+
+## Commit Message Standard
+
+Use the [Conventional Commits](https://www.conventionalcommits.org/) format for **both** commit messages and PR titles:
+
+```
+<type>(<optional-scope>): <short imperative summary>
+```
+
+### Rules
+
+- Use lowercase `type` and summary text
+- Keep summaries concise and do not end with a period
+- Use `!` only for breaking changes (explain in commit body or PR description)
+- For PR titles, choose the primary change type
+
+### Common Types
+
+| Type | When to Use |
+|------|-------------|
+| `feat` | New features |
+| `fix` | Bug fixes |
+| `docs` | Documentation changes |
+| `chore` | Maintenance tasks |
+| `refactor` | Code restructuring |
+| `test` | Test additions or fixes |
+| `ci` | CI/CD changes |
+| `build` | Build system changes |
+| `perf` | Performance improvements |
+| `revert` | Reverting previous changes |
+
+### Examples
+
+<CodeGroup>
+```text Feature
+feat(kernel): add environment source labels
+```
+
+```text Bug Fix
+fix(runtimed): handle missing daemon socket
+```
+
+```text Documentation
+docs(agents): enforce conventional commit format
+```
+
+```text Breaking Change
+feat(api)!: remove deprecated execute_code endpoint
+
+BREAKING CHANGE: The execute_code endpoint has been removed.
+Use execute_cell instead.
+```
+</CodeGroup>
+
+## Development Workflow
+
+### 1. Fork and Clone
+
+```bash
+git clone https://github.com/YOUR_USERNAME/desktop.git
+cd desktop
+```
+
+### 2. Create a Branch
+
+```bash
+git checkout -b feat/my-feature
+```
+
+Use a descriptive branch name that matches your commit type.
+
+### 3. Make Changes
+
+Write your code, following the project's patterns and conventions. See [Building from Source](/development/building) for development commands.
+
+### 4. Test Your Changes
+
+Run both unit tests and E2E tests:
+
+```bash
+# Run Rust tests
+cargo test
+
+# Run TypeScript tests
+pnpm test:run
+
+# Run E2E tests (macOS)
+./e2e/dev.sh cycle
+```
+
+See [Testing](/development/testing) for comprehensive testing guidance.
+
+### 5. Format and Lint
+
+```bash
+# Format Rust
+cargo fmt
+
+# Lint Rust
+cargo clippy --all-targets -- -D warnings
+
+# Format and lint TypeScript/JavaScript
+npx @biomejs/biome check --fix apps/notebook/src/ e2e/
+```
+
+### 6. Commit
+
+```bash
+git add .
+git commit -m "feat(scope): add amazing feature"
+```
+
+### 7. Push and Open PR
+
+```bash
+git push origin feat/my-feature
+```
+
+Open a PR on GitHub with:
+- A clear title following Conventional Commits format
+- A description explaining what and why
+- Screenshots/videos for UI changes
+- References to related issues
+
+## Project Structure
+
+```
+nteract/desktop
+├── src/                    # Shared UI code (React components, hooks, utils)
+│   ├── components/
+│   │   ├── ui/            # shadcn primitives
+│   │   ├── cell/          # Notebook cell components
+│   │   ├── outputs/       # Output renderers
+│   │   ├── editor/        # CodeMirror editor
+│   │   └── widgets/       # ipywidgets controls
+│   └── lib/
+├── apps/                   # App entry points
+│   ├── notebook/          # Notebook Tauri frontend
+│   └── sidecar/           # Sidecar WebView frontend
+├── crates/                 # Rust code
+│   ├── runt/              # CLI binary
+│   ├── runtimed/          # Background daemon
+│   ├── notebook/          # Notebook Tauri app
+│   ├── sidecar/           # Sidecar wry/tao app
+│   ├── kernel-launch/     # Kernel launching utilities
+│   ├── kernel-env/        # Environment management
+│   └── tauri-jupyter/     # Shared Tauri/Jupyter utilities
+├── docs/                   # Architecture documentation
+├── contributing/           # Developer guides
+└── e2e/                    # End-to-end tests
+```
+
+## Key Components
+
+| Component | Description |
+|-----------|-------------|
+| `nteract` | Desktop notebook editor (Tauri + React) |
+| `runtimed` | Background daemon managing environments, sync, kernel execution |
+| `runt` | CLI for managing kernels, notebooks, daemon |
+| `sidecar` | Viewer for Jupyter kernel outputs |
+| `runtimed` (PyPI) | Python bindings for the daemon |
+
+## Common Tasks
+
+### Adding a New Feature
+
+<Steps>
+  <Step title="Plan the feature">
+    Consider architecture, user experience, and backward compatibility. Discuss in an issue first for large changes.
+  </Step>
+  
+  <Step title="Identify components">
+    Determine which crates/apps need changes. Frontend? Backend? Daemon?
+  </Step>
+  
+  <Step title="Write tests first">
+    Consider writing tests before implementation (TDD). This helps clarify requirements.
+  </Step>
+  
+  <Step title="Implement">
+    Write clean, well-documented code following existing patterns.
+  </Step>
+  
+  <Step title="Add E2E tests">
+    For user-facing features, add end-to-end tests to prevent regressions.
+  </Step>
+  
+  <Step title="Update docs">
+    Document user-facing changes and update architecture docs if needed.
+  </Step>
+</Steps>
+
+### Fixing a Bug
+
+<Steps>
+  <Step title="Reproduce the bug">
+    Write a test that demonstrates the bug. This ensures the fix works and prevents future regressions.
+  </Step>
+  
+  <Step title="Find the root cause">
+    Use logs, debuggers, and code inspection to identify the issue.
+  </Step>
+  
+  <Step title="Fix and verify">
+    Make the minimal change needed. Verify the test now passes.
+  </Step>
+  
+  <Step title="Test edge cases">
+    Consider related scenarios that might also be broken.
+  </Step>
+</Steps>
+
+### Refactoring
+
+<Steps>
+  <Step title="Ensure test coverage">
+    Make sure existing tests cover the code you're refactoring.
+  </Step>
+  
+  <Step title="Make small, incremental changes">
+    Refactor in small commits that keep tests passing.
+  </Step>
+  
+  <Step title="Verify behavior unchanged">
+    Run the full test suite after each change.
+  </Step>
+</Steps>
+
+## Git Worktrees (Advanced)
+
+If you're working on multiple features or testing across branches, use git worktrees:
+
+```bash
+# Create a worktree for a feature
+git worktree add ../nteract-feature feat/my-feature
+cd ../nteract-feature
+
+# Each worktree gets isolated daemon in dev mode
+cargo xtask dev-daemon  # Terminal 1
+cargo xtask dev         # Terminal 2
+```
+
+### Workspace Description
+
+Set a description to identify worktrees in the debug banner:
+
+```bash
+mkdir -p .context
+echo "Testing kernel interrupt handling" > .context/workspace-description
+```
+
+This appears in the notebook app's debug banner (debug builds only).
+
+## Environment Variables (Conductor Workspaces)
+
+When working in a Conductor workspace, these are set automatically:
+
+| Variable | Purpose |
+|----------|---------||
+| `CONDUCTOR_WORKSPACE_PATH` | Enables dev mode; daemon state isolated to `~/.cache/runt/worktrees/{hash}/` |
+| `CONDUCTOR_WORKSPACE_NAME` | Human-readable workspace name for display |
+| `CONDUCTOR_PORT` | Vite dev server port (avoids conflicts) |
+| `CONDUCTOR_DEFAULT_BRANCH` | Target branch for PRs (usually `main`) |
+
+## Getting Help
+
+- **Issues** - Search [existing issues](https://github.com/nteract/desktop/issues) or open a new one
+- **Discussions** - Ask questions in [GitHub Discussions](https://github.com/nteract/desktop/discussions)
+- **Code** - Read the source! The codebase is well-documented
+
+## Review Process
+
+1. **Automated checks** - CI runs tests, formatting, linting
+2. **Code review** - Maintainers review for quality, design, tests
+3. **Iteration** - Address feedback, make changes
+4. **Merge** - Maintainer merges when approved
+
+<Note>
+Be patient during review. Maintainers are volunteers and may take time to respond.
+</Note>
+
+## Resources
+
+- [Building from Source](/development/building)
+- [Testing Guide](/development/testing)
+- [Architecture Deep Dive](/development/architecture-deep-dive)
+- [Release Process](/development/release-process)
+- [GitHub Repository](https://github.com/nteract/desktop)
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the BSD-3-Clause License.

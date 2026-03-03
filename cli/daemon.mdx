@@ -1,0 +1,369 @@
+---
+title: runt daemon
+description: Daemon service management and troubleshooting
+---
+
+The `runt daemon` commands manage the `runtimed` background service, which handles environment pools, notebook synchronization, and kernel lifecycle.
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `status` | Show daemon status, pool info, and uptime |
+| `start` | Start the daemon service |
+| `stop` | Stop the daemon service |
+| `restart` | Restart the daemon (stop + start) |
+| `install` | Install daemon as a system service |
+| `uninstall` | Uninstall the system service |
+| `logs` | Tail the daemon log file |
+| `flush` | Flush environment pools and rebuild |
+| `shutdown` | Request daemon shutdown |
+| `ping` | Check if daemon is running (exit code only) |
+| `doctor` | Diagnose installation issues |
+| `list-worktrees` | List dev worktree daemons (development) |
+
+## runt daemon status
+
+Show comprehensive daemon status including service state, pool statistics, and version info.
+
+```bash
+runt daemon status [--json]
+```
+
+### Example Output
+
+```
+$ runt daemon status
+runtimed Daemon Status
+======================
+Service installed: yes
+Daemon running:    yes
+PID:               12345
+Version:           0.1.0
+Blob server:       http://127.0.0.1:9876
+Uptime:            2h 34m
+
+Pool:
+  UV:    2/2 ready
+  Conda: 1/2 ready (1 warming)
+```
+
+### JSON Output
+
+```bash
+runt daemon status --json
+```
+
+```json
+{
+  "installed": true,
+  "running": true,
+  "dev_mode": false,
+  "daemon_info": {
+    "pid": 12345,
+    "version": "0.1.0",
+    "endpoint": "/Users/alice/.cache/runt/runtimed.sock",
+    "blob_port": 9876,
+    "started_at": "2026-03-03T10:00:00Z"
+  },
+  "pool_stats": {
+    "uv_available": 2,
+    "uv_warming": 0,
+    "conda_available": 1,
+    "conda_warming": 1
+  }
+}
+```
+
+## runt daemon logs
+
+Tail the daemon log file.
+
+```bash
+runt daemon logs [OPTIONS]
+```
+
+### Options
+
+<ParamField query="follow" type="boolean" optional>
+  Follow the log file (like `tail -f`). Press Ctrl+C to exit.
+</ParamField>
+
+<ParamField query="lines" type="number" default="50">
+  Number of lines to display from the end of the log file.
+</ParamField>
+
+### Examples
+
+```bash
+# Show last 50 lines
+runt daemon logs
+
+# Show last 100 lines
+runt daemon logs -n 100
+
+# Follow logs in real-time
+runt daemon logs -f
+```
+
+### Log Locations
+
+- **macOS**: `~/Library/Caches/runt/runtimed.log`
+- **Linux**: `~/.cache/runt/runtimed.log`
+- **Dev mode**: `~/.cache/runt/worktrees/{hash}/runtimed.log`
+
+## runt daemon start/stop/restart
+
+Manage the daemon service lifecycle.
+
+```bash
+runt daemon start
+runt daemon stop
+runt daemon restart
+```
+
+<Note>
+The daemon must be installed first with `runt daemon install`. The nteract Desktop app automatically installs the daemon on first launch.
+</Note>
+
+### Examples
+
+```bash
+# Start daemon
+$ runt daemon start
+Starting runtimed service...
+Service started.
+
+# Check status
+$ runt daemon status
+Daemon running:    yes
+
+# Restart daemon
+$ runt daemon restart
+Restarting runtimed service...
+Service restarted.
+```
+
+## runt daemon install/uninstall
+
+Install or remove the daemon as a system service.
+
+```bash
+runt daemon install [--binary PATH]
+runt daemon uninstall
+```
+
+### Options
+
+<ParamField query="binary" type="string" optional>
+  Path to the `runtimed` binary to install. If omitted, looks for a sibling binary next to `runt`.
+</ParamField>
+
+### Service Installation Locations
+
+<Tabs>
+  <Tab title="macOS">
+    - **Binary**: `~/Library/Application Support/io.nteract.runtimed/bin/runtimed`
+    - **LaunchAgent**: `~/Library/LaunchAgents/io.nteract.runtimed.plist`
+    
+    The daemon runs as a user-level LaunchAgent, starting automatically on login.
+  </Tab>
+  
+  <Tab title="Linux">
+    - **Binary**: `~/.local/share/runtimed/bin/runtimed`
+    - **Systemd unit**: `~/.config/systemd/user/runtimed.service`
+    
+    The daemon runs as a systemd user service.
+  </Tab>
+  
+  <Tab title="Windows">
+    - **Binary**: `%LOCALAPPDATA%\runtimed\runtimed.exe`
+    - **Startup script**: `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\runtimed.bat`
+    
+    The daemon runs as a startup script.
+  </Tab>
+</Tabs>
+
+### Examples
+
+```bash
+# Install from app bundle
+runt daemon install
+
+# Install from custom location
+runt daemon install --binary /path/to/runtimed
+
+# Uninstall
+runt daemon uninstall
+```
+
+## runt daemon flush
+
+Flush all prewarmed environments and rebuild the pool.
+
+```bash
+runt daemon flush
+```
+
+Use this when:
+- Changing default packages in settings
+- Upgrading Python or environment tools
+- Clearing corrupted environments
+
+```bash
+$ runt daemon flush
+Pool flushed — environments will be rebuilt
+```
+
+The daemon will automatically create new prewarmed UV and Conda environments based on your current settings.
+
+## runt daemon doctor
+
+Diagnose daemon installation and health issues.
+
+```bash
+runt daemon doctor [--fix] [--json]
+```
+
+### Options
+
+<ParamField query="fix" type="boolean" optional>
+  Attempt to automatically fix issues (reinstall binary, restart service, etc.)
+</ParamField>
+
+<ParamField query="json" type="boolean" optional>
+  Output results in JSON format
+</ParamField>
+
+### Example Output
+
+```
+$ runt daemon doctor
+runtimed Health Check
+=====================
+Installed binary:   ~/.local/share/runtimed/bin/runtimed [ok]
+Service config:     ~/.config/systemd/user/runtimed.service [ok]
+Socket file:        ~/.cache/runt/runtimed.sock [ok]
+Daemon state:       ~/.cache/runt/daemon.json [ok] (PID 12345 running)
+Daemon running:     yes
+
+Diagnosis: Daemon is healthy and running.
+```
+
+### Auto-Fix Mode
+
+```bash
+$ runt daemon doctor --fix
+```
+
+The doctor will:
+1. Remove stale state files (if process is dead)
+2. Reinstall missing daemon binary (from app bundle)
+3. Start the daemon if installed but not running
+
+## runt daemon ping
+
+Check if the daemon is running (returns exit code only, no output).
+
+```bash
+runt daemon ping
+```
+
+- **Exit 0**: Daemon is running
+- **Exit 1**: Daemon is not running
+
+### Example Usage in Scripts
+
+```bash
+if runt daemon ping; then
+  echo "Daemon is running"
+else
+  echo "Daemon is not running"
+  runt daemon start
+fi
+```
+
+## runt daemon shutdown
+
+Request graceful daemon shutdown.
+
+```bash
+runt daemon shutdown
+```
+
+This sends a shutdown request to the daemon, which will:
+1. Stop all running kernels
+2. Close notebook sync connections
+3. Exit the daemon process
+
+<Warning>
+Use `runt daemon stop` for normal service management. The `shutdown` command is for development/debugging.
+</Warning>
+
+## runt daemon list-worktrees
+
+List all development worktree daemons (dev mode only).
+
+```bash
+runt daemon list-worktrees [--json]
+```
+
+This is useful in development when running multiple isolated daemons for different git worktrees.
+
+### Example Output
+
+```
+$ runt daemon list-worktrees
+╭──────────────┬─────────┬───────────────────────────────┬─────────────────╮
+│ HASH         │ STATUS  │ WORKTREE                      │ DESCRIPTION     │
+├──────────────┼─────────┼───────────────────────────────┼─────────────────┤
+│ a1b2c3d4     │ running │ ~/dev/nteract/feature-branch  │ Testing widgets │
+│ e5f6g7h8     │ stopped │ ~/dev/nteract/bugfix          │ -               │
+╰──────────────┴─────────┴───────────────────────────────┴─────────────────╯
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Daemon won't start">
+    **Error**: "Failed to start daemon" or timeout on startup
+    
+    **Solution**:
+    1. Check logs: `runt daemon logs -n 100`
+    2. Look for port conflicts or permission errors
+    3. Run health check: `runt daemon doctor --fix`
+    4. Reinstall: `runt daemon uninstall && runt daemon install`
+  </Accordion>
+  
+  <Accordion title="Daemon is stale">
+    **Symptoms**: `daemon.json` exists but process is dead
+    
+    **Solution**:
+    ```bash
+    # Automatic repair
+    runt daemon doctor --fix
+    
+    # Or manual cleanup
+    rm ~/.cache/runt/daemon.json
+    rm ~/.cache/runt/runtimed.sock
+    runt daemon start
+    ```
+  </Accordion>
+  
+  <Accordion title="Pool environments not warming">
+    **Symptoms**: `runt daemon status` shows 0 available environments
+    
+    **Solution**:
+    1. Check logs for errors: `runt daemon logs -f`
+    2. Common issues:
+       - UV or Conda not installed
+       - Network issues downloading packages
+       - Disk space exhausted
+    3. Flush and rebuild: `runt daemon flush`
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+- `runt notebooks` — List notebooks managed by daemon
+- `runt shutdown` — Shutdown a specific notebook

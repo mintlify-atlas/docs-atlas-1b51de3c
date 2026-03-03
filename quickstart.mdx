@@ -1,80 +1,489 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get from install to your first notebook execution in minutes"
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Make sure you have nteract Desktop installed. If not, follow the [Installation guide](/installation).
 
-### Step 1: Set up your local environment
+## Open Your First Notebook
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+<Steps>
+  <Step title="Launch nteract Desktop">
+    Open the nteract application from your Applications folder (macOS), Start Menu (Windows), or by running the AppImage (Linux).
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    The daemon starts automatically in the background.
+  </Step>
+  
+  <Step title="Open a notebook file">
+    You can open a notebook in several ways:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    **From the GUI:**
+    - Click **Open Notebook** and browse to a `.ipynb` file
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    **From the command line:**
+    ```bash
+    runt notebook path/to/notebook.ipynb
+    ```
+    
+    **Create a new notebook:**
+    ```bash
+    # Python notebook
+    runt notebook
+    
+    # Or specify a path for the new notebook
+    runt notebook ~/notebooks/analysis.ipynb
+    ```
+  </Step>
+  
+  <Step title="Wait for kernel startup">
+    nteract Desktop automatically:
+    - Detects the notebook's runtime (Python or Deno)
+    - Finds nearby project files (pyproject.toml, environment.yml, etc.)
+    - Launches the appropriate kernel with the right environment
+    
+    The first launch may take a few seconds to create the environment. Subsequent launches are instant thanks to environment pooling.
+  </Step>
+  
+  <Step title="Run your first cell">
+    Click on a code cell and press **Shift+Enter** to execute it.
+    
+    The output appears immediately below the cell.
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Your First Python Notebook
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+Let's create a simple Python notebook and run some code.
 
-### Step 3: Go live
+<Steps>
+  <Step title="Create a new Python notebook">
+    ```bash
+    runt notebook ~/notebooks/hello.ipynb
+    ```
+  </Step>
+  
+  <Step title="Add a code cell">
+    Type the following Python code:
+    
+    ```python
+    import sys
+    print(f"Python {sys.version}")
+    print("Hello from nteract Desktop!")
+    ```
+  </Step>
+  
+  <Step title="Run the cell">
+    Press **Shift+Enter**. You should see output like:
+    
+    ```
+    Python 3.12.1 (main, Jan 10 2024, 12:00:00)
+    Hello from nteract Desktop!
+    ```
+  </Step>
+  
+  <Step title="Add a package">
+    Open the dependency panel in the sidebar and add a package like `pandas`.
+    
+    nteract Desktop automatically:
+    - Installs the package in the notebook's environment
+    - Restarts the kernel with the new dependencies
+    - Preserves your cell outputs
+  </Step>
+  
+  <Step title="Use the package">
+    Create a new cell:
+    
+    ```python
+    import pandas as pd
+    
+    df = pd.DataFrame({
+        'name': ['Alice', 'Bob', 'Charlie'],
+        'age': [25, 30, 35]
+    })
+    
+    df
+    ```
+    
+    Run the cell to see a formatted DataFrame output.
+  </Step>
+</Steps>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+## Your First Deno Notebook
 
-## Next steps
+Let's create a TypeScript/JavaScript notebook with Deno.
 
-Now that you have your docs running, explore these key features:
+<Steps>
+  <Step title="Create a new Deno notebook">
+    ```bash
+    runt notebook --runtime deno ~/notebooks/hello-deno.ipynb
+    ```
+    
+    nteract Desktop automatically installs Deno if it's not on your PATH.
+  </Step>
+  
+  <Step title="Add a TypeScript cell">
+    ```typescript
+    const greeting: string = "Hello from Deno!";
+    console.log(greeting);
+    
+    Deno.version
+    ```
+  </Step>
+  
+  <Step title="Run the cell">
+    Press **Shift+Enter** to see the output:
+    
+    ```
+    Hello from Deno!
+    { deno: "1.40.0", v8: "12.1.285.6", typescript: "5.3.3" }
+    ```
+  </Step>
+  
+  <Step title="Import from URL">
+    Deno supports importing modules directly from URLs:
+    
+    ```typescript
+    import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
+    
+    console.log("Imported serve function:", typeof serve);
+    ```
+  </Step>
+</Steps>
 
-<CardGroup cols={2}>
+## Using the CLI
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+The `runt` CLI provides powerful commands for managing notebooks and kernels.
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+### List Open Notebooks
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+See all notebooks currently open with kernel and environment info:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+```bash
+runt notebooks
+```
 
-</CardGroup>
+Output:
+
+```
+╭──────────────────────────────────────┬────────┬──────────────┬────────┬───────╮
+│ NOTEBOOK                             │ KERNEL │ ENV          │ STATUS │ PEERS │
+├──────────────────────────────────────┼────────┼──────────────┼────────┼───────┤
+│ ~/notebooks/analysis.ipynb           │ python │ uv:inline    │ idle   │ 1     │
+│ ~/notebooks/hello-deno.ipynb         │ deno   │ deno         │ idle   │ 1     │
+╰──────────────────────────────────────┴────────┴──────────────┴────────┴───────╯
+```
+
+### Interactive Console
+
+Launch an interactive Python console with a Jupyter kernel:
+
+```bash
+runt console
+```
+
+This gives you a REPL connected to a kernel, perfect for quick experiments.
+
+### Daemon Management
+
+Check daemon status and environment pools:
+
+```bash
+# Daemon status
+runt daemon status
+
+# View daemon logs
+runt daemon logs -f
+
+# Flush and rebuild environment pools
+runt daemon flush
+```
+
+## Working with Dependencies
+
+nteract Desktop offers three ways to manage dependencies:
+
+### 1. Inline Dependencies (Recommended for Portability)
+
+Store dependencies directly in the notebook metadata:
+
+<Steps>
+  <Step title="Open the dependency panel">
+    Click the **Dependencies** icon in the sidebar.
+  </Step>
+  
+  <Step title="Add packages">
+    Type package names like `pandas`, `numpy>=2.0`, or `matplotlib`.
+    
+    Click **Sync** to install them.
+  </Step>
+  
+  <Step title="Share the notebook">
+    Anyone who opens your notebook gets the same dependencies automatically.
+  </Step>
+</Steps>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Inline dependencies are cached in `~/.cache/runt/inline-envs/` by dependency hash, so the same set of packages is reused across notebooks.
+</Note>
+
+### 2. Project Files (Recommended for Projects)
+
+If your notebook is in a directory with a project file, nteract Desktop auto-detects it:
+
+<CodeGroup>
+```toml pyproject.toml
+[project]
+name = "my-analysis"
+dependencies = [
+    "pandas>=2.0",
+    "matplotlib",
+]
+```
+
+```yaml environment.yml
+name: my-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pandas
+  - matplotlib
+```
+
+```toml pixi.toml
+[project]
+name = "my-analysis"
+channels = ["conda-forge"]
+
+[dependencies]
+pandas = "*"
+matplotlib = "*"
+```
+</CodeGroup>
+
+The dependency panel shows project dependencies and offers actions:
+- **Use project environment** — run in the project's `.venv`
+- **Copy to notebook** — snapshot deps into notebook metadata
+
+### 3. Prewarmed Pools (Default)
+
+If no dependencies are specified, nteract Desktop uses a prewarmed environment from the pool:
+
+- **UV pool** — Basic Python environment with ipykernel
+- **Conda pool** — Conda-based environment with common packages
+
+You can configure which pool is used in Settings → Default Python Environment.
+
+## Keyboard Shortcuts
+
+Speed up your workflow with these shortcuts:
+
+| Action | Shortcut |
+|--------|----------|
+| Run cell and advance | **Shift+Enter** |
+| Run cell in place | **Ctrl+Enter** (or **Cmd+Enter** on macOS) |
+| Insert cell above | **A** (command mode) |
+| Insert cell below | **B** (command mode) |
+| Delete cell | **D, D** (press D twice in command mode) |
+| Change to code cell | **Y** (command mode) |
+| Change to markdown cell | **M** (command mode) |
+| Enter command mode | **Esc** |
+| Enter edit mode | **Enter** |
+| Save notebook | **Cmd+S** (macOS) or **Ctrl+S** (Windows/Linux) |
+
+<Tip>
+Command mode is when the cell has a blue border. Edit mode is when you're typing inside a cell.
+</Tip>
+
+## Realtime Collaboration
+
+Open the same notebook in multiple windows to see realtime sync in action:
+
+<Steps>
+  <Step title="Open a notebook">
+    ```bash
+    runt notebook ~/notebooks/shared.ipynb
+    ```
+  </Step>
+  
+  <Step title="Open it again in another window">
+    ```bash
+    runt notebook ~/notebooks/shared.ipynb
+    ```
+  </Step>
+  
+  <Step title="Edit in one window">
+    Type in a cell in the first window.
+  </Step>
+  
+  <Step title="Watch changes sync">
+    The second window updates instantly via Automerge.
+  </Step>
+</Steps>
+
+This also works with AI agents using the Python bindings:
+
+```python
+from runtimed import Session
+
+session = Session("~/notebooks/shared.ipynb")
+session.edit_cell(cell_id, "print('Hello from agent!')")
+```
+
+The desktop app sees the agent's edits in realtime.
+
+## Viewing Outputs
+
+nteract Desktop renders rich outputs:
+
+- **Images**: PNG, JPEG, SVG
+- **HTML**: Interactive visualizations
+- **LaTeX**: Math equations via KaTeX
+- **Markdown**: Formatted text
+- **DataFrames**: Pandas/Polars tables
+- **Plots**: Matplotlib, Plotly, Altair
+
+Example with matplotlib:
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(0, 2*np.pi, 100)
+y = np.sin(x)
+
+plt.plot(x, y)
+plt.title("Sine Wave")
+plt.show()
+```
+
+The plot appears inline below the cell.
+
+## Trust and Security
+
+When you open a notebook with dependencies for the first time, nteract Desktop may show a trust dialog.
+
+**Why?** Dependencies are signed with a per-machine key. Notebooks from other machines have a different signature, so nteract Desktop asks you to verify before installing.
+
+**What to do:**
+- Review the dependency list
+- Click **Trust and Install** if the dependencies look safe
+- The notebook is re-signed with your key and won't prompt again
+
+See the [Environments guide](/guides/environment-management) for more details.
+
+## Checking Daemon Logs
+
+If something goes wrong, check the daemon logs:
+
+```bash
+# View last 100 log lines
+runt daemon logs -n 100
+
+# Follow logs in realtime
+runt daemon logs -f
+```
+
+Logs are also stored on disk:
+
+<CodeGroup>
+```bash macOS
+~/Library/Caches/runt/runtimed.log
+```
+
+```bash Linux
+~/.cache/runt/runtimed.log
+```
+
+```powershell Windows
+%LOCALAPPDATA%\runt\runtimed.log
+```
+</CodeGroup>
+
+## Next Steps
+
+Now that you've run your first notebook, explore these topics:
+
+<CardGroup cols={2}>
+  <Card title="Environment Management" icon="flask" href="/guides/environment-management">
+    Learn how nteract Desktop detects and manages Python and Deno environments
+  </Card>
+  
+  <Card title="Settings" icon="gear" href="/guides/settings">
+    Configure default runtime, environment backend, and other preferences
+  </Card>
+  
+  <Card title="Collaboration" icon="users" href="/guides/collaboration">
+    Deep dive into realtime sync and multi-client notebooks
+  </Card>
+  
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Full reference for all runt commands
+  </Card>
+</CardGroup>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Kernel won't start">
+    Check daemon status:
+    
+    ```bash
+    runt daemon status
+    ```
+    
+    If the daemon is not running, restart it:
+    
+    ```bash
+    # macOS
+    launchctl kickstart -k gui/$(id -u)/io.nteract.runtimed
+    
+    # Linux
+    systemctl --user restart runtimed.service
+    ```
+  </Accordion>
+  
+  <Accordion title="Dependencies not installing">
+    Check the daemon logs for error messages:
+    
+    ```bash
+    runt daemon logs -f
+    ```
+    
+    Common issues:
+    - Network connectivity (can't reach PyPI or conda-forge)
+    - Invalid package names
+    - Conflicting dependencies
+  </Accordion>
+  
+  <Accordion title="Notebook won't open">
+    Verify the file path is correct and the file is valid JSON:
+    
+    ```bash
+    # Check if file exists
+    ls -l path/to/notebook.ipynb
+    
+    # Validate JSON
+    python -m json.tool path/to/notebook.ipynb > /dev/null
+    ```
+  </Accordion>
+  
+  <Accordion title="Environment detection not working">
+    nteract Desktop walks up from the notebook directory looking for project files.
+    
+    Verify your project file is in the notebook's directory or a parent directory:
+    
+    ```bash
+    # From notebook directory
+    ls pyproject.toml environment.yml pixi.toml
+    ```
+    
+    The search stops at `.git` boundaries and your home directory.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+For more troubleshooting help, see the [Logging guide](/guides/logging) or check the [GitHub issues](https://github.com/nteract/desktop/issues).
 </Note>

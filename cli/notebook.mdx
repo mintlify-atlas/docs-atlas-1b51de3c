@@ -1,0 +1,134 @@
+---
+title: runt notebook
+description: Open notebooks in the nteract Desktop app
+---
+
+The `runt notebook` command launches the nteract Desktop application and optionally opens a notebook file.
+
+## Usage
+
+```bash
+runt notebook [PATH] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="PATH" type="string" optional>
+  Path to a notebook file (`.ipynb`) or directory to open. Supports both absolute and relative paths.
+  
+  - If a file path is provided, that notebook opens in the app
+  - If a directory is provided, the app opens in that directory
+  - If omitted, the app opens without loading a file
+</ParamField>
+
+## Options
+
+<ParamField query="runtime" type="string" optional>
+  Runtime for new notebooks. Valid values: `python`, `deno`.
+  
+  Only applies when creating new notebooks in the app session.
+</ParamField>
+
+## Examples
+
+### Open an existing notebook
+
+```bash
+runt notebook analysis.ipynb
+runt notebook ~/projects/notebook.ipynb
+```
+
+### Open with specific runtime
+
+```bash
+# New Python notebooks by default
+runt notebook --runtime python
+
+# New Deno/TypeScript notebooks by default
+runt notebook --runtime deno
+```
+
+### Open app without a file
+
+```bash
+runt notebook
+```
+
+The app will start in the current directory, which becomes the working directory for new untitled notebooks.
+
+## Platform Behavior
+
+<Tabs>
+  <Tab title="macOS">
+    Uses `open -a nteract` to launch the app. If the app is already running, it activates the existing instance and opens the notebook in a new window.
+    
+    ```bash
+    # Launches /Applications/nteract.app
+    runt notebook data.ipynb
+    ```
+  </Tab>
+  
+  <Tab title="Linux">
+    Launches the `nteract` binary from your PATH or common install locations.
+    
+    ```bash
+    # Typically installed at /usr/local/bin/nteract
+    runt notebook data.ipynb
+    ```
+  </Tab>
+  
+  <Tab title="Windows">
+    Launches `nteract.exe` from the default install location or PATH.
+    
+    ```powershell
+    # Usually in %LOCALAPPDATA%\Programs\nteract
+    runt notebook data.ipynb
+    ```
+  </Tab>
+</Tabs>
+
+## Working Directory
+
+The app captures its working directory at startup:
+
+- If launched from a terminal, uses the current shell directory
+- If launched from an app bundle (macOS double-click), uses `~/notebooks`
+
+This working directory is used for new untitled notebooks.
+
+## Related Commands
+
+- `runt notebooks` — List currently open notebooks
+- `runt shutdown` — Shutdown a notebook's kernel
+- `runt daemon status` — Check if daemon is running
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="App doesn't launch">
+    **Symptoms**: "Failed to launch nteract" error
+    
+    **Solution**:
+    1. Verify the app is installed:
+       - macOS: Check `/Applications/nteract.app` exists
+       - Linux: Run `which nteract`
+       - Windows: Check `%LOCALAPPDATA%\Programs\nteract`
+    2. Reinstall nteract Desktop from [GitHub Releases](https://github.com/nteract/desktop/releases)
+  </Accordion>
+  
+  <Accordion title="Notebook won't open">
+    **Symptoms**: App launches but notebook doesn't load
+    
+    **Solution**:
+    1. Verify the file path is correct and file exists
+    2. Check file has `.ipynb` extension
+    3. Ensure file is readable (check permissions)
+    4. Try opening from the app's File menu instead
+  </Accordion>
+  
+  <Accordion title="Runtime flag ignored">
+    **Symptoms**: `--runtime` flag doesn't change kernel type
+    
+    **Note**: The `--runtime` flag only affects **new** notebooks created during the session. Opening an existing `.ipynb` file always uses the runtime specified in the notebook's metadata.
+  </Accordion>
+</AccordionGroup>

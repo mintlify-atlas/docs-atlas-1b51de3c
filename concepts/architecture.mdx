@@ -1,0 +1,220 @@
+---
+title: Architecture
+description: Overview of nteract Desktop's system architecture
+---
+
+nteract Desktop is built on a multi-process architecture with a background daemon managing stateful resources. This design enables instant notebook startup, multi-window synchronization, and persistent kernel state.
+
+## System Overview
+
+The system consists of three main components:
+
+```
+┌─────────────────────────────────────────────────┐
+│  Notebook window (thin view)                    │
+│  - Subscribes to automerge doc                  │
+│  - Fetches outputs via HTTP                     │
+│  - Sends execution requests                     │
+└──────────────┬──────────────────────────────────┘
+               │ single unix socket (multiplexed)
+┌──────────────▼──────────────────────────────────┐
+│  runtimed (daemon)                              │
+│                                                 │
+│  ┌─────────────┐  ┌──────────────────────────┐  │
+│  │ Pool        │  │ CRDT sync layer          │  │
+│  │ (UV, Conda) │  │ - Settings doc           │  │
+│  └─────────────┘  │ - Notebook docs (rooms)  │  │
+│                   └──────────────────────────┘  │
+│  ┌─────────────────────────────────────────┐    │
+│  │ Output store                            │    │
+│  │ - Output manifests (Jupyter semantics)  │    │
+│  │ - ContentRef (inline / blob)            │    │
+│  │ - Inlining threshold                    │    │
+│  └──────────────┬──────────────────────────┘    │
+│  ┌──────────────▼──────────────────────────┐    │
+│  │ Blob store (content-addressed)          │    │
+│  │ - On-disk CAS with metadata sidecars    │    │
+│  │ - HTTP read server on localhost         │    │
+│  └─────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────┐    │
+│  │ Kernel manager                          │    │
+│  │ - Owns kernel processes                 │    │
+│  │ - Subscribes to iopub                   │    │
+│  │ - Writes outputs to store               │    │
+│  └─────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────┘
+```
+
+## Core Principles
+
+### 1. Daemon as Source of Truth
+
+The runtimed daemon owns all runtime state. Clients (UI, agents, CLI) are views into daemon state, not independent state holders.
+
+<Note>
+If the daemon restarts, clients automatically reconnect and resync their state.
+</Note>
+
+**Implications:**
+- Clients subscribe to daemon state, they don't maintain parallel copies
+- State changes flow through the daemon, not peer-to-peer between clients
+- Multiple windows editing the same notebook see each other's changes in real-time
+
+### 2. Automerge Document as Canonical State
+
+The Automerge document is the source of truth for notebook content: cells, their sources, metadata, and structure. All clients sync to this shared document.
+
+**Implications:**
+- Cell source code lives in the Automerge doc
+- To execute a cell: write it to the doc first, then request execution by `cell_id`
+- The daemon reads from the doc when executing, never from ad-hoc request parameters
+
+### 3. On-Disk Notebook as Checkpoint
+
+The `.ipynb` file on disk is a checkpoint/snapshot that the daemon periodically saves. It is not the live state.
+
+**Flow:**
+1. Daemon reads `.ipynb` on first open, loads into Automerge doc
+2. Daemon writes `.ipynb` on explicit save or auto-save intervals
+3. Unknown metadata keys in `.ipynb` are preserved through round-trips
+4. Crash recovery: last checkpoint + Automerge doc replay
+
+### 4. Binary Separation via Manifests
+
+Cell outputs are stored as content-addressed blobs with manifest references. This keeps large binary data (images, plots) out of the sync protocol.
+
+**Benefits:**
+- Output broadcasts contain blob hashes, not inline data
+- Clients resolve blobs from the blob store (disk or HTTP)
+- Large outputs don't block document sync
+- Manifest format allows lazy loading and deduplication
+
+## Multi-Process Design
+
+### Why Multiple Processes?
+
+Each notebook window runs as a separate OS process. This provides:
+
+- **Isolation**: A crash in one notebook doesn't affect others
+- **Resource management**: OS can manage memory per-window
+- **Independent windowing**: Each window is a full application instance
+
+### Coordination Challenge
+
+Without coordination between processes:
+
+1. **Race conditions**: Multiple windows try to claim the same prewarmed environment
+2. **Wasted resources**: Each window creates its own pool of environments
+3. **Slow cold starts**: First notebook waits for environment creation
+4. **Lost state**: Closing a window loses kernel state
+
+The daemon solves this by providing a single coordinating entity.
+
+## Communication Protocol
+
+All daemon communication goes through a single Unix socket (or named pipe on Windows) with channel-based routing.
+
+### Handshake-Based Multiplexing
+
+Connections start with a JSON handshake declaring their channel:
+
+```rust
+pub enum Handshake {
+    Pool,
+    SettingsSync,
+    NotebookSync { notebook_id: String },
+    Blob,
+}
+```
+
+| Channel | Purpose | Lifetime |
+|---------|---------|----------|
+| `Pool` | Environment pool operations | Short-lived |
+| `SettingsSync` | Automerge sync messages for settings | Long-lived |
+| `NotebookSync` | Automerge sync messages for notebooks | Long-lived |
+| `Blob` | Binary blob writes | Short-lived |
+
+### Framing Protocol
+
+```
+[4 bytes: payload length (big-endian u32)] [payload bytes]
+```
+
+Pool channel uses length-framed JSON request/response. Sync channels use Automerge's binary sync protocol.
+
+## Platform Paths
+
+The daemon uses platform-appropriate directories:
+
+| Platform | Cache Directory | Config Directory |
+|----------|----------------|------------------|
+| Linux | `~/.cache/runt/` | `~/.config/runt/` |
+| macOS | `~/Library/Caches/runt/` | `~/Library/Application Support/runt/` |
+| Windows | `%LOCALAPPDATA%\runt\` | `%APPDATA%\runt\` |
+
+### Key Files
+
+| File | Purpose |
+|------|----------|
+| `daemon.lock` | Singleton mutual exclusion |
+| `daemon.json` | Running daemon state (endpoint, PID, version) |
+| `daemon.log` | Daemon logs |
+| `runtimed.sock` | Unix socket for IPC |
+| `settings.automerge` | Settings CRDT document |
+| `notebook-docs/{hash}.automerge` | Notebook CRDT documents |
+| `envs/` | Prewarmed environments |
+| `blobs/` | Content-addressed blob store |
+
+## Service Management
+
+The daemon runs as a user-level service:
+
+| Platform | Mechanism |
+|----------|------------|
+| macOS | launchd user agent (`~/Library/LaunchAgents/io.nteract.runtimed.plist`) |
+| Linux | systemd user service (`~/.config/systemd/user/runtimed.service`) |
+| Windows | VBS script in Startup folder |
+
+<Accordion title="CLI Commands">
+```bash
+runt daemon status     # Check service and pool status
+runt daemon start      # Start the daemon service
+runt daemon stop       # Stop the daemon service
+runt daemon restart    # Restart the daemon
+runt daemon logs -f    # Tail daemon logs
+```
+</Accordion>
+
+## Benefits of This Architecture
+
+<CardGroup cols={2}>
+  <Card title="Instant Startup" icon="bolt">
+    Prewarmed environments mean notebooks open in milliseconds, not seconds.
+  </Card>
+  <Card title="Multi-Window Sync" icon="arrows-rotate">
+    Edit the same notebook in multiple windows with real-time synchronization.
+  </Card>
+  <Card title="Persistent State" icon="floppy-disk">
+    Close a window and the kernel keeps running. Outputs are preserved.
+  </Card>
+  <Card title="Resource Efficiency" icon="gauge">
+    Share environment pools across all notebooks instead of duplicating.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Daemon" href="/concepts/daemon" icon="server">
+    Learn about the runtimed background daemon
+  </Card>
+  <Card title="Environments" href="/concepts/environments" icon="box">
+    Understand environment management
+  </Card>
+  <Card title="Synchronization" href="/concepts/sync" icon="arrows-rotate">
+    Explore CRDT-based sync
+  </Card>
+  <Card title="Kernels" href="/concepts/kernels" icon="microchip">
+    Deep dive into kernel management
+  </Card>
+</CardGroup>

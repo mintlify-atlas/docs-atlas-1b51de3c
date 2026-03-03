@@ -1,0 +1,213 @@
+---
+title: runt console
+description: Interactive Jupyter console (REPL)
+---
+
+The `runt console` command launches a standalone Jupyter kernel and provides an interactive Read-Eval-Print-Loop (REPL) in your terminal.
+
+## Usage
+
+```bash
+runt console [KERNEL] [OPTIONS]
+```
+
+## Arguments
+
+<ParamField path="KERNEL" type="string" optional>
+  Name of the kernel to launch (e.g., `python3`, `julia`, `deno`).
+  
+  If omitted, you must provide a custom command with `--cmd`.
+</ParamField>
+
+## Options
+
+<ParamField query="cmd" type="string" optional>
+  Custom command to launch the kernel. Use `{connection_file}` as a placeholder for the connection file path.
+  
+  Example: `--cmd "deno jupyter --kernel --conn {connection_file}"`
+</ParamField>
+
+<ParamField query="verbose" type="boolean" optional>
+  Print all Jupyter protocol messages for debugging.
+</ParamField>
+
+## Examples
+
+### Python console
+
+```bash
+runt console python3
+```
+
+Output:
+```
+python3 console
+Use Ctrl+D to exit.
+
+In [1]: import numpy as np
+
+In [2]: np.array([1, 2, 3]) * 2
+Out[2]: array([2, 4, 6])
+
+In [3]:
+```
+
+### Custom kernel command
+
+```bash
+runt console --cmd "deno jupyter --kernel --conn {connection_file}"
+```
+
+### Debug mode (verbose)
+
+```bash
+runt console python3 --verbose
+```
+
+Shows all Jupyter messages:
+```
+python3 console
+Use Ctrl+D to exit.
+
+In [1]: 1 + 1
+[iopub] status (ours=true)
+[iopub] execute_input (ours=true)
+[iopub] execute_result (ours=true)
+Out[1]: 2
+[iopub] status (ours=true)
+[shell] execute_reply (ours=true)
+```
+
+## Features
+
+### Input/Output Handling
+
+- **Standard output**: Streamed to terminal as it's produced
+- **Standard error**: Displayed in red
+- **Return values**: Shown as `Out[N]: ...`
+- **Errors**: Full traceback displayed
+
+### Stdin Support
+
+The console supports `input()` calls from the kernel:
+
+```python
+In [1]: name = input("Enter your name: ")
+Enter your name: Alice
+
+In [2]: print(f"Hello, {name}")
+Hello, Alice
+```
+
+Password prompts are hidden:
+
+```python
+In [1]: import getpass
+
+In [2]: pw = getpass.getpass("Password: ")
+Password: [hidden]
+```
+
+### Execution Count
+
+Each input/output is numbered sequentially, matching the Jupyter notebook experience:
+
+```
+In [1]: x = 5
+In [2]: x * 2
+Out[2]: 10
+```
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+D` | Exit the console |
+| `Ctrl+C` | Interrupt running code (sent to kernel) |
+
+## Exit Behavior
+
+When you exit the console (Ctrl+D or EOF):
+
+1. A graceful shutdown request is sent to the kernel
+2. The kernel process is terminated
+3. Connection files are cleaned up
+
+```
+In [5]: [Ctrl+D pressed]
+
+Shutting down kernel...
+Done.
+```
+
+## Advanced Usage
+
+### Launch Julia kernel
+
+```bash
+runt console julia
+```
+
+### Launch R kernel
+
+```bash
+runt console ir
+```
+
+### Custom Deno kernel
+
+```bash
+runt console --cmd "deno jupyter --kernel --conn {connection_file}"
+```
+
+## Connection Files
+
+The console creates a kernel connection file at:
+
+```
+~/.local/share/jupyter/runtime/runt-kernel-{id}.json
+```
+
+This file is automatically cleaned up on exit.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Kernel not found">
+    **Error**: `Kernelspec 'python3' not found`
+    
+    **Solution**:
+    1. List available kernels: `jupyter kernelspec list`
+    2. Install the kernel:
+       ```bash
+       # Python kernel
+       pip install ipykernel
+       python -m ipykernel install --user
+       
+       # Deno kernel
+       deno jupyter --install
+       ```
+  </Accordion>
+  
+  <Accordion title="Kernel hangs or doesn't respond">
+    **Symptoms**: Commands don't execute, no output appears
+    
+    **Solution**:
+    1. Press `Ctrl+C` to interrupt the kernel
+    2. Exit with `Ctrl+D` and restart the console
+    3. Check for errors: `runt console python3 --verbose`
+  </Accordion>
+  
+  <Accordion title="Output display issues">
+    **Symptoms**: Rich output (plots, HTML) doesn't display
+    
+    **Note**: The console only displays plain text output. Rich media types (images, HTML, LaTeX) are ignored. Use `runt notebook` for full output rendering.
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+- `runt jupyter ps` — List running kernels
+- `runt jupyter stop` — Stop a kernel
+- `runt jupyter exec` — Execute code in a running kernel
+- `runt notebook` — Launch full notebook UI with rich output

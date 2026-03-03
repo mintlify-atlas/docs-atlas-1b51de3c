@@ -1,0 +1,679 @@
+---
+title: "IPC Protocol"
+description: "Unix socket IPC protocol for communicating with the runtime daemon"
+---
+
+## Binary Framing
+
+All communication over the Unix socket uses length-prefixed binary framing:
+
+```
+[4 bytes: payload length (big-endian u32)] [payload bytes]
+```
+
+### Frame Size Limits
+
+<ParamField path="MAX_FRAME_SIZE" type="number" default="104857600">
+  Maximum data frame size: 100 MiB (matches blob size limit)
+</ParamField>
+
+<ParamField path="MAX_CONTROL_FRAME_SIZE" type="number" default="65536">
+  Maximum control/handshake frame size: 64 KiB
+</ParamField>
+
+<Note>
+The handshake and JSON request/response frames use the 64 KiB limit to prevent oversized frames from forcing large allocations before channel routing.
+</Note>
+
+## Handshake
+
+Every connection starts with a JSON handshake as the first frame:
+
+<CodeGroup>
+
+```json Pool Channel
+{
+  "channel": "pool"
+}
+```
+
+```json Settings Sync
+{
+  "channel": "settings_sync"
+}
+```
+
+```json Notebook Sync
+{
+  "channel": "notebook_sync",
+  "notebook_id": "/path/to/notebook.ipynb",
+  "protocol": "v2",
+  "working_dir": "/home/user/project"
+}
+```
+
+```json Blob Channel
+{
+  "channel": "blob"
+}
+```
+
+</CodeGroup>
+
+### Handshake Fields
+
+<ParamField path="channel" type="string" required>
+  Channel type: `pool`, `settings_sync`, `notebook_sync`, or `blob`
+</ParamField>
+
+<ParamField path="notebook_id" type="string">
+  **Notebook sync only**: Notebook file path or UUID (for untitled notebooks)
+</ParamField>
+
+<ParamField path="protocol" type="string" default="v1">
+  **Notebook sync only**: Protocol version (`v1` or `v2`). Use `v2` for typed frames.
+</ParamField>
+
+<ParamField path="working_dir" type="string">
+  **Notebook sync only**: Working directory for untitled notebooks (used for project file detection)
+</ParamField>
+
+## Pool Channel
+
+### Request Types
+
+All requests are JSON objects with a `type` field:
+
+<CodeGroup>
+
+```json Take Environment
+{
+  "type": "take",
+  "env_type": "uv"  // or "conda"
+}
+```
+
+```json Return Environment
+{
+  "type": "return",
+  "env": {
+    "env_type": "uv",
+    "venv_path": "/path/to/venv",
+    "python_path": "/path/to/venv/bin/python"
+  }
+}
+```
+
+```json Pool Status
+{
+  "type": "status"
+}
+```
+
+```json Ping
+{
+  "type": "ping"
+}
+```
+
+```json Shutdown
+{
+  "type": "shutdown"
+}
+```
+
+```json Flush Pool
+{
+  "type": "flush_pool"
+}
+```
+
+```json List Rooms
+{
+  "type": "list_rooms"
+}
+```
+
+</CodeGroup>
+
+### Response Types
+
+<CodeGroup>
+
+```json Environment Acquired
+{
+  "type": "env",
+  "env": {
+    "env_type": "uv",
+    "venv_path": "/Users/username/.cache/runt/envs/runtimed-uv-abc123/",
+    "python_path": "/Users/username/.cache/runt/envs/runtimed-uv-abc123/bin/python"
+  }
+}
+```
+
+```json Pool Empty
+{
+  "type": "empty"
+}
+```
+
+```json Environment Returned
+{
+  "type": "returned"
+}
+```
+
+```json Pool Statistics
+{
+  "type": "stats",
+  "stats": {
+    "uv_available": 3,
+    "uv_warming": 0,
+    "conda_available": 2,
+    "conda_warming": 1,
+    "uv_error": null,
+    "conda_error": null
+  }
+}
+```
+
+```json Pong
+{
+  "type": "pong"
+}
+```
+
+```json Shutting Down
+{
+  "type": "shutting_down"
+}
+```
+
+```json Pool Flushed
+{
+  "type": "flushed"
+}
+```
+
+```json Error
+{
+  "type": "error",
+  "message": "Environment creation failed"
+}
+```
+
+```json Rooms List
+{
+  "type": "rooms_list",
+  "rooms": [
+    {
+      "notebook_id": "/path/to/notebook.ipynb",
+      "active_peers": 2,
+      "has_kernel": true,
+      "kernel_type": "python",
+      "env_source": "uv:inline",
+      "kernel_status": "idle"
+    }
+  ]
+}
+```
+
+</CodeGroup>
+
+### Pool Status Fields
+
+<ResponseField name="uv_available" type="number">
+  Number of prewarmed UV environments ready to claim
+</ResponseField>
+
+<ResponseField name="uv_warming" type="number">
+  Number of UV environments currently being created
+</ResponseField>
+
+<ResponseField name="conda_available" type="number">
+  Number of prewarmed Conda environments ready to claim
+</ResponseField>
+
+<ResponseField name="conda_warming" type="number">
+  Number of Conda environments currently being created
+</ResponseField>
+
+<ResponseField name="uv_error" type="object">
+  Error info if UV pool is in error state (e.g., invalid default packages)
+</ResponseField>
+
+<ResponseField name="conda_error" type="object">
+  Error info if Conda pool is in error state
+</ResponseField>
+
+## Notebook Sync Channel
+
+### Protocol v2: Typed Frames
+
+Notebook sync connections using `protocol: "v2"` send typed frames where the first byte indicates the message type:
+
+| Byte | Type | Content |
+|------|------|------|
+| `0x00` | Automerge Sync | Binary Automerge sync message |
+| `0x01` | Request | JSON NotebookRequest |
+| `0x02` | Response | JSON NotebookResponse |
+| `0x03` | Broadcast | JSON NotebookBroadcast |
+
+<Note>
+After the handshake, the server sends a `ProtocolCapabilities` response indicating the negotiated protocol before starting sync.
+</Note>
+
+### Notebook Requests
+
+<CodeGroup>
+
+```json Launch Kernel
+{
+  "action": "launch_kernel",
+  "kernel_type": "python",
+  "env_source": "uv:inline",
+  "notebook_path": "/path/to/notebook.ipynb"
+}
+```
+
+```json Execute Cell
+{
+  "action": "execute_cell",
+  "cell_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```json Clear Outputs
+{
+  "action": "clear_outputs",
+  "cell_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```json Interrupt Execution
+{
+  "action": "interrupt_execution"
+}
+```
+
+```json Shutdown Kernel
+{
+  "action": "shutdown_kernel"
+}
+```
+
+```json Get Kernel Info
+{
+  "action": "get_kernel_info"
+}
+```
+
+```json Run All Cells
+{
+  "action": "run_all_cells"
+}
+```
+
+```json Send Comm (Widget Interaction)
+{
+  "action": "send_comm",
+  "message": {
+    "header": {
+      "msg_id": "abc-123",
+      "msg_type": "comm_msg",
+      "username": "user",
+      "session": "session-id",
+      "version": "5.3"
+    },
+    "content": {
+      "comm_id": "widget-id",
+      "data": {"value": 42}
+    }
+  }
+}
+```
+
+```json Get History
+{
+  "action": "get_history",
+  "pattern": "import*",
+  "n": 20,
+  "unique": true
+}
+```
+
+```json Code Completion
+{
+  "action": "complete",
+  "code": "import numpy as np\nnp.arr",
+  "cursor_pos": 25
+}
+```
+
+```json Save Notebook
+{
+  "action": "save_notebook",
+  "format_cells": true
+}
+```
+
+```json Sync Environment
+{
+  "action": "sync_environment"
+}
+```
+
+</CodeGroup>
+
+### Notebook Responses
+
+<CodeGroup>
+
+```json Kernel Launched
+{
+  "result": "kernel_launched",
+  "kernel_type": "python",
+  "env_source": "uv:inline",
+  "launched_config": {
+    "uv_deps": ["numpy", "pandas"],
+    "conda_deps": null,
+    "conda_channels": null,
+    "deno_permissions": null
+  }
+}
+```
+
+```json Cell Queued
+{
+  "result": "cell_queued",
+  "cell_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```json Kernel Info
+{
+  "result": "kernel_info",
+  "kernel_type": "python",
+  "env_source": "conda:prewarmed",
+  "status": "idle"
+}
+```
+
+```json Queue State
+{
+  "result": "queue_state",
+  "executing": "cell-id-1",
+  "queued": ["cell-id-2", "cell-id-3"]
+}
+```
+
+```json History Result
+{
+  "result": "history_result",
+  "entries": [
+    {
+      "session": 0,
+      "line": 1,
+      "source": "import numpy as np"
+    },
+    {
+      "session": 0,
+      "line": 2,
+      "source": "import pandas as pd"
+    }
+  ]
+}
+```
+
+```json Completion Result
+{
+  "result": "completion_result",
+  "items": [
+    {
+      "label": "array",
+      "kind": "function",
+      "detail": "def array(object, dtype=None, ...)",
+      "source": "kernel"
+    }
+  ],
+  "cursor_start": 22,
+  "cursor_end": 25
+}
+```
+
+```json Error
+{
+  "result": "error",
+  "error": "No kernel is running"
+}
+```
+
+</CodeGroup>
+
+### Notebook Broadcasts
+
+Broadcasts are sent proactively to all connected peers when events occur:
+
+<CodeGroup>
+
+```json Kernel Status
+{
+  "event": "kernel_status",
+  "status": "busy",
+  "cell_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```json Execution Started
+{
+  "event": "execution_started",
+  "cell_id": "550e8400-e29b-41d4-a716-446655440000",
+  "execution_count": 5
+}
+```
+
+```json Output
+{
+  "event": "output",
+  "cell_id": "550e8400-e29b-41d4-a716-446655440000",
+  "output_type": "stream",
+  "output_json": "{\"name\":\"stdout\",\"text\":\"Hello\\n\"}"
+}
+```
+
+```json Outputs Cleared
+{
+  "event": "outputs_cleared",
+  "cell_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```json Display Update (Widget Progress)
+{
+  "event": "display_update",
+  "display_id": "widget-progress-bar",
+  "data": {
+    "text/plain": "50%"
+  },
+  "metadata": {}
+}
+```
+
+```json Comm Message (Widget)
+{
+  "event": "comm",
+  "msg_type": "comm_msg",
+  "content": {
+    "comm_id": "widget-id",
+    "data": {"value": 50}
+  },
+  "buffers": []
+}
+```
+
+```json Comm State Sync
+{
+  "event": "comm_sync",
+  "comms": [
+    {
+      "comm_id": "widget-1",
+      "target_name": "jupyter.widget",
+      "state": {"value": 50},
+      "model_module": "@jupyter-widgets/controls",
+      "model_name": "IntSliderModel",
+      "buffers": []
+    }
+  ]
+}
+```
+
+```json Environment Progress
+{
+  "event": "env_progress",
+  "env_type": "conda",
+  "phase": "repodata",
+  "message": "Fetching package metadata",
+  "progress": 0.3
+}
+```
+
+```json Environment Sync State
+{
+  "event": "env_sync_state",
+  "in_sync": false,
+  "diff": {
+    "added": ["matplotlib"],
+    "removed": ["scipy"],
+    "channels_changed": false,
+    "deno_changed": false
+  }
+}
+```
+
+</CodeGroup>
+
+## Blob Channel
+
+### Store Blob Flow
+
+```
+1. Client sends handshake:
+   {"channel": "blob"}
+
+2. Client sends request (JSON frame):
+   {"action": "store", "media_type": "image/png"}
+
+3. Client sends blob data (raw binary frame):
+   [PNG binary bytes]
+
+4. Server responds (JSON frame):
+   {"hash": "a1b2c3d4e5f6..."}
+```
+
+### Get Blob Port
+
+Query the HTTP server port:
+
+```json Request
+{
+  "action": "get_port"
+}
+```
+
+```json Response
+{
+  "port": 54321
+}
+```
+
+## Example: Pool Client
+
+```rust
+use runtimed::client::PoolClient;
+use runtimed::EnvType;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Connect to daemon (finds socket automatically)
+    let client = PoolClient::connect(None).await?;
+    
+    // Ping to verify connection
+    client.ping().await?;
+    println!("Daemon is alive");
+    
+    // Get pool statistics
+    let stats = client.status().await?;
+    println!("UV available: {}", stats.uv_available);
+    println!("Conda available: {}", stats.conda_available);
+    
+    // Acquire a UV environment
+    match client.take(EnvType::Uv).await? {
+        Some(env) => {
+            println!("Got environment: {:?}", env.python_path);
+            
+            // Use the environment...
+            
+            // Return it to the pool when done
+            client.return_env(env).await?;
+        }
+        None => {
+            println!("No environments available");
+        }
+    }
+    
+    Ok(())
+}
+```
+
+## Example: Notebook Sync Client
+
+```rust
+use runtimed::notebook_sync_client::NotebookSyncClient;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Connect to notebook room
+    let client = NotebookSyncClient::connect(
+        "/path/to/notebook.ipynb",
+        None,  // daemon socket (auto-detect)
+    ).await?;
+    
+    // Update cell source (syncs to all peers)
+    client.update_source(
+        "550e8400-e29b-41d4-a716-446655440000",
+        "print('Hello from daemon')"
+    ).await?;
+    
+    // Listen for changes from other peers
+    tokio::spawn(async move {
+        loop {
+            if let Some(change) = client.recv_changes().await? {
+                println!("Notebook updated: {} cells", change.cells.len());
+            }
+        }
+    });
+    
+    Ok(())
+}
+```
+
+## Error Handling
+
+### Connection Errors
+
+- **Socket not found**: Daemon is not running
+- **Connection refused**: Socket exists but daemon is not accepting connections (crashed)
+- **Timeout**: Daemon is unresponsive (hung)
+
+### Protocol Errors
+
+- **Frame too large**: Oversized payload (check MAX_FRAME_SIZE limits)
+- **Invalid JSON**: Malformed request/response
+- **Unknown channel**: Invalid handshake channel
+- **Unknown frame type**: Invalid typed frame byte (notebook sync v2)
+
+### Pool Errors
+
+- **Empty pool**: No environments available (check with `status`)
+- **Invalid env type**: Unknown environment type (must be `uv` or `conda`)
+- **Creation failed**: Environment creation error (check daemon logs)

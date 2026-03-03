@@ -1,0 +1,150 @@
+---
+title: "Introduction"
+description: "A fast, modern toolkit for Jupyter notebooks with instant startup, realtime sync, and intelligent environment management"
+---
+
+## Welcome to nteract Desktop
+
+nteract Desktop is a native desktop application for Jupyter notebooks built for speed and collaboration. It features instant startup, realtime sync across windows and agents, and intelligent environment management that automatically handles Python and Deno dependencies.
+
+Built on [runtimelib](https://crates.io/crates/runtimelib) and [jupyter-protocol](https://crates.io/crates/jupyter-protocol), nteract Desktop provides a modern foundation for interactive computing.
+
+<CardGroup cols={2}>
+  <Card
+    title="Instant Startup"
+    icon="bolt"
+  >
+    Launch notebooks immediately with prewarmed environment pools. No waiting for virtual environments to spin up.
+  </Card>
+  <Card
+    title="Realtime Collaboration"
+    icon="users"
+  >
+    Open the same notebook in multiple windows or from AI agents. Changes sync instantly via Automerge.
+  </Card>
+  <Card
+    title="Smart Environments"
+    icon="flask"
+  >
+    Automatic environment detection from pyproject.toml, environment.yml, or pixi.toml. Supports both UV and Conda backends.
+  </Card>
+  <Card
+    title="Background Daemon"
+    icon="server"
+  >
+    The runtimed daemon manages kernels, environments, and sync in the background. Notebooks persist across app restarts.
+  </Card>
+  <Card
+    title="Python & Deno"
+    icon="code"
+  >
+    First-class support for Python (ipykernel) and Deno (TypeScript/JavaScript) notebooks with automatic runtime detection.
+  </Card>
+  <Card
+    title="Command Line Interface"
+    icon="terminal"
+  >
+    Full CLI access with runt commands for managing notebooks, kernels, and the daemon from your terminal.
+  </Card>
+</CardGroup>
+
+## What's Included
+
+The desktop app bundles everything you need:
+
+| Component | Description |
+|-----------|-------------|
+| **nteract** | Desktop notebook editor (Tauri + React) |
+| **runtimed** | Background daemon — environment pools, notebook sync, kernel execution |
+| **runt** | CLI for managing kernels, notebooks, and the daemon |
+| **sidecar** | Viewer for Jupyter kernel outputs |
+
+## Key Features
+
+### Intelligent Environment Management
+
+No manual virtual environment creation. nteract Desktop automatically:
+- Detects project files (pyproject.toml, environment.yml, pixi.toml)
+- Creates and caches environments using UV or Conda
+- Supports inline dependencies stored in notebook metadata
+- Maintains prewarmed environment pools for instant startup
+
+### Realtime Document Sync
+
+Multiple clients can edit the same notebook simultaneously:
+- Changes propagate instantly via Automerge CRDT
+- AI agents can collaborate with you in the same document
+- Conflict-free merging of concurrent edits
+- Binary outputs stored as content-addressed blobs
+
+### Background Daemon Architecture
+
+The runtimed daemon runs as a system service:
+- Kernels persist when you close windows
+- Environment pools stay warm between sessions
+- Notebook state syncs automatically
+- Check daemon status with `runt daemon status`
+
+## Quick Example
+
+Open a notebook and run code immediately:
+
+```bash
+# Open a notebook in the desktop app
+runt notebook path/to/notebook.ipynb
+
+# Or launch an interactive console
+runt console
+```
+
+The app automatically detects your environment and starts the appropriate kernel. No configuration needed.
+
+## Architecture Highlights
+
+<Note>
+The daemon is the source of truth for all runtime state. The desktop app and CLI are views into daemon state, not independent state holders.
+</Note>
+
+- **Automerge documents** are the canonical notebook state
+- **On-disk .ipynb files** are checkpoints saved periodically
+- **Blob store** keeps binary outputs out of the sync protocol
+- **Environment pools** enable instant kernel startup
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Download and install nteract Desktop for macOS, Windows, or Linux.
+  </Card>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Get from install to your first notebook execution in minutes.
+  </Card>
+</CardGroup>
+
+## Python Bindings
+
+The daemon is also available as a Python package for programmatic access:
+
+```bash
+pip install runtimed
+```
+
+See the [Python Bindings guide](/guides/python-bindings) for usage examples.
+
+## Open Source
+
+nteract Desktop is open source and built on published Rust crates:
+
+- [jupyter-protocol](https://crates.io/crates/jupyter-protocol) — Jupyter messaging protocol
+- [runtimelib](https://crates.io/crates/runtimelib) — Jupyter kernel interactions over ZeroMQ
+- [nbformat](https://crates.io/crates/nbformat) — Notebook parsing
+
+Contributions welcome at [github.com/nteract/desktop](https://github.com/nteract/desktop).

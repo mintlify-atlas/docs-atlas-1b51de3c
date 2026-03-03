@@ -1,0 +1,337 @@
+---
+title: Logging and Debugging
+description: Access daemon and frontend logs to troubleshoot issues in nteract Desktop
+---
+
+This guide explains how to access and enable verbose logging in nteract Desktop.
+
+## Daemon Logs
+
+The daemon (`runtimed`) logs to a file that persists across sessions.
+
+### Log File Location
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    ~/Library/Caches/runt/runtimed.log
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```bash
+    ~/.cache/runt/runtimed.log
+    ```
+  </Tab>
+  <Tab title="Dev Mode">
+    ```bash
+    ~/.cache/runt/worktrees/{hash}/runtimed.log
+    ```
+  </Tab>
+</Tabs>
+
+### Viewing Logs
+
+<CodeGroup>
+```bash Last 100 Lines
+# Show last 100 lines
+runt daemon logs -n 100
+```
+
+```bash Follow Logs
+# Follow/tail logs (live updates)
+runt daemon logs -f
+```
+
+```bash Check Status
+# Check daemon version and status
+runt daemon status
+```
+</CodeGroup>
+
+### Enabling Verbose Logging
+
+For more detailed output, restart the daemon with debug logging:
+
+<Steps>
+  <Step title="Stop the daemon">
+    ```bash
+    runt daemon stop
+    ```
+  </Step>
+  
+  <Step title="Start with debug logging">
+    <CodeGroup>
+    ```bash All Modules
+    # Debug logging for all modules
+    RUST_LOG=debug runtimed
+    ```
+    
+    ```bash Specific Module
+    # Debug specific module
+    RUST_LOG=runtimed::notebook_sync_server=debug runtimed
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+<Note>
+For persistent verbose logging, you can modify the launch agent/service configuration.
+</Note>
+
+## Frontend Logs
+
+The notebook app logs to the browser console.
+
+### Opening Developer Tools
+
+Access the browser console:
+
+- **macOS:** Cmd+Option+I
+- **Windows/Linux:** Ctrl+Shift+I
+- **Menu:** View > Developer > Developer Tools
+
+### Enabling Debug Mode
+
+By default, routine operations are not logged in production. To enable verbose logging:
+
+<Steps>
+  <Step title="Open browser console">
+    Press Cmd+Option+I (macOS) or Ctrl+Shift+I (Windows/Linux)
+  </Step>
+  
+  <Step title="Enable debug mode">
+    ```javascript
+    localStorage.setItem('runt:debug', 'true')
+    ```
+  </Step>
+  
+  <Step title="Reload the page">
+    Press Cmd+R (macOS) or Ctrl+R (Windows/Linux)
+  </Step>
+</Steps>
+
+### Disabling Debug Mode
+
+```javascript
+localStorage.removeItem('runt:debug');
+// Reload the page
+```
+
+### Log Prefixes
+
+Logs are prefixed by component for easy filtering:
+
+| Prefix | Component |
+|--------|----------|
+| `[daemon-kernel]` | Kernel communication |
+| `[notebook-sync]` | Document sync |
+| `[manifest-resolver]` | Output blob resolution |
+| `[App]` | Main app lifecycle |
+
+## Troubleshooting
+
+### Kernel Not Starting
+
+Check daemon logs for errors:
+
+```bash
+runt daemon logs -n 50 | grep -i error
+```
+
+Common issues:
+
+- Environment not found (check pool status with `runt daemon status`)
+- Python/Deno executable not available
+- Port conflicts
+- Permission issues
+
+### Outputs Not Displaying
+
+<Steps>
+  <Step title="Enable debug mode">
+    Set `localStorage.setItem('runt:debug', 'true')` in the browser console
+  </Step>
+  
+  <Step title="Check console for errors">
+    Look for `[manifest-resolver]` errors in the browser console
+  </Step>
+  
+  <Step title="Check daemon logs">
+    ```bash
+    runt daemon logs -f
+    ```
+  </Step>
+</Steps>
+
+Common issues:
+
+- Blob store corruption (try restarting daemon)
+- MIME type not supported
+- Widget rendering errors (check widget compatibility)
+
+### Environment Issues
+
+Check daemon logs for UV/Conda errors:
+
+```bash
+runt daemon logs | grep -E "(uv|conda|env)"
+```
+
+Common issues:
+
+- Package installation failures
+- Incompatible package versions
+- Network issues downloading packages
+- Disk space issues
+
+### Sync Issues
+
+If changes aren't syncing between windows:
+
+<Steps>
+  <Step title="Check daemon status">
+    ```bash
+    runt daemon status
+    ```
+  </Step>
+  
+  <Step title="Check active notebooks">
+    ```bash
+    runt notebooks
+    ```
+  </Step>
+  
+  <Step title="Watch sync logs">
+    ```bash
+    RUST_LOG=runtimed::notebook_sync_server=debug runtimed
+    ```
+  </Step>
+</Steps>
+
+Common issues:
+
+- Different notebook IDs for same file
+- Daemon not running
+- Automerge document corruption
+
+## Log Levels
+
+The `RUST_LOG` environment variable supports these levels:
+
+| Level | Description |
+|-------|-------------|
+| `error` | Only errors |
+| `warn` | Errors and warnings |
+| `info` | Normal operations (default) |
+| `debug` | Detailed debugging info |
+| `trace` | Very verbose (all operations) |
+
+### Module-Specific Logging
+
+You can enable debug logging for specific modules:
+
+```bash
+# Kernel management only
+RUST_LOG=runtimed::kernel_manager=debug runtimed
+
+# Multiple modules
+RUST_LOG=runtimed::kernel_manager=debug,runtimed::notebook_sync_server=debug runtimed
+
+# All runtimed modules
+RUST_LOG=runtimed=debug runtimed
+```
+
+## Common Debug Workflows
+
+### Debugging Kernel Issues
+
+```bash
+# Terminal 1: Watch daemon logs
+runt daemon logs -f
+
+# Terminal 2: Check kernel processes
+runt ps
+
+# Terminal 3: Check active notebooks
+runt notebooks
+```
+
+### Debugging Environment Detection
+
+```bash
+# Enable environment detection logging
+RUST_LOG=runtimed::notebook_sync_server=debug,kernel_launch=debug runtimed
+
+# Check what environments are available
+runt daemon status
+```
+
+### Debugging Widget Issues
+
+<Steps>
+  <Step title="Enable frontend debug mode">
+    ```javascript
+    localStorage.setItem('runt:debug', 'true')
+    ```
+  </Step>
+  
+  <Step title="Open developer tools">
+    Cmd+Option+I (macOS) or Ctrl+Shift+I (Windows/Linux)
+  </Step>
+  
+  <Step title="Filter console logs">
+    Filter by "widget" or "comm" in the console
+  </Step>
+  
+  <Step title="Check iframe errors">
+    Look for errors in the isolated widget iframe
+  </Step>
+</Steps>
+
+## Performance Profiling
+
+### Frontend Performance
+
+Use browser DevTools Performance tab:
+
+1. Open DevTools (Cmd+Option+I)
+2. Go to Performance tab
+3. Click Record
+4. Perform the slow operation
+5. Stop recording and analyze
+
+### Backend Performance
+
+Enable trace-level logging for detailed timing:
+
+```bash
+RUST_LOG=trace runtimed
+```
+
+<Warning>
+Trace logging generates extremely verbose output and may impact performance. Use only for debugging specific issues.
+</Warning>
+
+## Reporting Issues
+
+When reporting issues, include:
+
+1. **Daemon logs:** Last 100 lines from `runt daemon logs -n 100`
+2. **Daemon status:** Output from `runt daemon status`
+3. **Frontend console:** Screenshot or copy of browser console errors
+4. **Steps to reproduce:** Clear steps to trigger the issue
+5. **Environment:** OS, nteract version, Python/Deno version
+
+### Collecting Logs
+
+```bash
+# Create a debug bundle
+mkdir nteract-debug
+runt daemon status > nteract-debug/status.txt
+runt daemon logs -n 200 > nteract-debug/daemon.log
+runt notebooks > nteract-debug/notebooks.txt
+runt ps > nteract-debug/processes.txt
+
+# Zip it up
+tar -czf nteract-debug.tar.gz nteract-debug/
+```

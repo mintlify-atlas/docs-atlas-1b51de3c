@@ -1,0 +1,289 @@
+---
+title: Environments
+description: How nteract Desktop manages Python and Deno environments
+---
+
+nteract Desktop automatically manages Python and Deno environments for your notebooks. You don't need to manually create virtual environments or install packages — the app handles it based on your notebook's metadata and nearby project files.
+
+## Two-Stage Detection
+
+When you open a notebook, nteract Desktop uses a two-stage detection system:
+
+### Stage 1: Runtime Detection
+
+Determine if this is a Python or Deno notebook by checking the kernelspec:
+
+| Priority | Source | Check | Result |
+|----------|--------|-------|--------|
+| 1 | `metadata.kernelspec.name` | `== "deno"` | Launch Deno kernel |
+| 2 | `metadata.kernelspec.name` | contains `"python"` | Resolve Python environment |
+| 3 | `metadata.kernelspec.language` | `== "typescript"` | Launch Deno kernel |
+| 4 | `metadata.language_info.name` | `== "typescript"` | Launch Deno kernel |
+| 5 | User setting | `default_runtime` preference | Python or Deno |
+
+<Info>
+**Key principle**: The notebook's encoded kernelspec takes priority over project files. A Deno notebook in a directory with `pyproject.toml` will launch a Deno kernel, allowing Python and Deno notebooks to coexist.
+</Info>
+
+### Stage 2: Python Environment Resolution
+
+For Python notebooks, determine which environment to use:
+
+| Priority | Source | Environment Type |
+|----------|--------|------------------|
+| 1 | Inline notebook metadata | Cached by dependency hash |
+| 2 | Closest project file | Depends on file type |
+| 3 | User preference | Prewarmed UV or Conda |
+
+## Environment Types
+
+### Inline Dependencies
+
+Dependencies stored directly in the notebook file, making it fully portable.
+
+**Storage**: Notebook metadata under `metadata.uv.dependencies` or `metadata.conda.dependencies`
+
+**Example**:
+```json
+{
+  "metadata": {
+    "uv": {
+      "dependencies": ["pandas", "numpy>=2.0"],
+      "requires-python": ">=3.10"
+    }
+  }
+}
+```
+
+**Benefits**:
+- Anyone who opens the notebook gets the same packages
+- No project file needed
+- Perfect for sharing notebooks
+
+**Management**: Use the dependency panel in the sidebar to add, remove, or sync packages.
+
+### Project File Environments
+
+The daemon walks up from the notebook's directory looking for project files. The **closest match wins**.
+
+#### pyproject.toml
+
+Auto-detected and used with `uv run` to start the kernel in the project's virtual environment.
+
+**Environment**:
+- Uses the project's `.venv/` directly
+- No separate cached environment
+- Dependencies stay in sync with the project
+
+**Dependency panel actions**:
+- **Use project environment** — run kernel in project's `.venv`
+- **Copy to notebook** — snapshot deps into notebook metadata (makes portable but may drift)
+
+#### environment.yml
+
+Conda environment files are parsed and used to create a conda environment via rattler.
+
+**Supports**:
+- Channels specification
+- Conda dependencies
+- Pip dependencies
+
+**Dependency panel**: Shows environment.yml dependencies with "Import to notebook" action.
+
+#### pixi.toml
+
+Pixi project files are converted to conda format and created using rattler.
+
+**Supports**:
+- `[dependencies]` — conda packages
+- `[pypi-dependencies]` — pip packages
+
+**Dependency panel**: Shows pixi dependencies with "Import to notebook" action.
+
+<Note>
+Project file search stops at git repository boundaries (`.git`) and the user's home directory to prevent cross-repository pollution.
+</Note>
+
+### Prewarmed Environments
+
+When no dependencies are specified and no project file is found, the daemon provides a prewarmed environment from the pool.
+
+**Pool configuration**:
+- Default size: 3 UV + 3 Conda environments
+- Background warming loops replenish as consumed
+- Max age: 2 days (auto-pruned)
+
+**Includes**:
+- `ipykernel` — Jupyter kernel
+- `ipywidgets` — Widget support
+- Default packages from settings
+
+**Storage**:
+- UV: `~/.cache/runt/envs/runtimed-uv-{uuid}/`
+- Conda: `~/.cache/runt/envs/runtimed-conda-{uuid}/`
+
+<Info>
+Prewarmed environments make notebook startup nearly instantaneous — no waiting for package installation.
+</Info>
+
+## Environment Caching
+
+Environments are cached by a hash of their dependencies so notebooks with identical deps share a single environment.
+
+### UV Caching
+
+**Hash**: SHA256(sorted deps + requires_python + env_id), first 16 hex chars
+
+**Location**: `~/.cache/runt/envs/{hash}/`
+
+**Behavior**:
+- Non-empty deps: env_id excluded from hash (allows cross-notebook sharing)
+- Empty deps: env_id included (per-notebook isolation)
+
+### Conda Caching
+
+**Hash**: SHA256(sorted deps + sorted channels + python version + env_id), first 16 hex chars
+
+**Location**: `~/.cache/runt/conda-envs/{hash}/`
+
+**Cache hit check**: Verifies that `{hash}/bin/python` (Unix) or `{hash}/Scripts/python.exe` (Windows) exists.
+
+## Deno Environments
+
+Deno notebooks use the Deno runtime for TypeScript/JavaScript. Unlike Python, Deno manages dependencies through import maps and URL imports.
+
+### Deno Acquisition
+
+1. **Check PATH**: Look for `deno` command
+2. **Bootstrap if needed**: Auto-install from conda-forge to `~/.cache/runt/tools/`
+
+<Info>
+Deno notebooks work out of the box — you don't need to install Deno manually.
+</Info>
+
+### Project Configuration
+
+If your notebook is near a `deno.json` or `deno.jsonc` file, Deno will use that configuration for import maps and permissions.
+
+**Note**: Deno notebooks don't participate in environment pooling. Each launch directly invokes `deno jupyter --kernel`.
+
+## Trust System
+
+Dependencies are signed with HMAC-SHA256 to prevent untrusted code execution on notebook open.
+
+**Trust key**: 32 random bytes stored at `~/.config/runt/trust-key`
+
+**Signed content**: Canonical JSON of `metadata.uv` + `metadata.conda` (not cell contents)
+
+**Signature format**: `"hmac-sha256:{hex_digest}"` stored in notebook metadata
+
+**Machine-specific**: The key is per-machine, so every shared notebook is untrusted on the recipient's machine.
+
+### Trust Dialog
+
+When you open a notebook with dependencies for the first time:
+
+1. Daemon verifies the signature
+2. If signature doesn't match (different machine), shows trust dialog
+3. After approval, re-signs with your machine's key
+4. Won't prompt again for this notebook
+
+<Warning>
+Always review the dependency list before approving. The packages will be installed and executed in your environment.
+</Warning>
+
+## User Preferences
+
+Configure default behaviors in settings:
+
+### Default Runtime
+
+Choose what type of kernel new notebooks use:
+- **Python** (default) — Standard Python notebooks with ipykernel
+- **Deno** — TypeScript/JavaScript notebooks using the Deno kernel
+
+### Default Python Environment
+
+Choose which package manager for Python notebooks:
+- **UV** (default) — Fast, pip-compatible package management
+- **Conda** — Supports conda packages (useful for non-Python dependencies like CUDA)
+
+This preference is used when no project files are detected and the notebook has no inline dependencies.
+
+## Cache Management
+
+Environments are cached for reuse, making subsequent opens instant.
+
+### Locations
+
+| What | Location |
+|------|----------|
+| UV environments | `~/.cache/runt/envs/` |
+| Conda environments | `~/.cache/runt/conda-envs/` |
+| Tools (uv, deno) | `~/.cache/runt/tools/` |
+| Trust key | `~/.config/runt/trust-key` |
+
+### Cleanup
+
+To reclaim disk space, delete the cache directories:
+
+```bash
+rm -rf ~/.cache/runt/envs/
+rm -rf ~/.cache/runt/conda-envs/
+```
+
+nteract Desktop will recreate environments as needed.
+
+<Info>
+The daemon automatically prunes environments older than 2 days on startup.
+</Info>
+
+## Troubleshooting
+
+<Accordion title="Packages aren't available after adding them">
+Click "Sync Now" in the dependency panel to install pending changes, then restart the kernel.
+
+The dependency panel shows pending changes until you explicitly sync.
+</Accordion>
+
+<Accordion title="Wrong environment detected">
+If the kernel started with a prewarmed environment instead of your project's dependencies:
+
+1. Check that your project file (`pyproject.toml`, `environment.yml`, `pixi.toml`) is in the notebook's directory or a parent directory
+2. Ensure the project file is within the same git repository (search stops at `.git` boundaries)
+3. Try restarting the kernel to re-run detection
+</Accordion>
+
+<Accordion title="Slow first start">
+The first time a notebook opens with dependencies, the daemon needs to download and install packages. This can take 30-60 seconds depending on the number of packages.
+
+Subsequent opens with the same dependencies are instant due to caching.
+</Accordion>
+
+<Accordion title="Trust dialog keeps appearing">
+This happens when the notebook's dependency signature doesn't match your machine's key.
+
+**Common causes**:
+- Notebook shared from another machine
+- Notebook cloned from a repository
+- Trust key regenerated
+
+Approve the dependencies once and the daemon will re-sign the notebook with your machine's key.
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Daemon" href="/concepts/daemon" icon="server">
+    Learn about the environment pool
+  </Card>
+  <Card title="Kernels" href="/concepts/kernels" icon="microchip">
+    Understand kernel launching
+  </Card>
+  <Card title="Settings" href="/settings" icon="gear">
+    Configure default preferences
+  </Card>
+  <Card title="Architecture" href="/concepts/architecture" icon="diagram-project">
+    View system overview
+  </Card>
+</CardGroup>

@@ -1,0 +1,390 @@
+---
+title: "Installation"
+description: "Download and install nteract Desktop on macOS, Windows, or Linux"
+---
+
+## Download from GitHub Releases
+
+The easiest way to install nteract Desktop is to download the latest release from GitHub:
+
+<Card
+  title="Download Latest Release"
+  icon="download"
+  href="https://github.com/nteract/desktop/releases"
+  horizontal
+>
+  Get the latest stable version for your platform
+</Card>
+
+## Platform-Specific Installation
+
+<Tabs>
+  <Tab title="macOS">
+    ### macOS Installation
+
+    Download the DMG file for your architecture:
+
+    <CodeGroup>
+    ```bash Apple Silicon (M1/M2/M3)
+    # Download nteract-darwin-arm64.dmg
+    # from GitHub Releases
+    ```
+
+    ```bash Intel
+    # Download nteract-darwin-x64.dmg
+    # from GitHub Releases
+    ```
+    </CodeGroup>
+
+    **Installation steps:**
+
+    <Steps>
+      <Step title="Open the DMG file">
+        Double-click the downloaded `nteract-darwin-arm64.dmg` or `nteract-darwin-x64.dmg` file.
+      </Step>
+      <Step title="Drag to Applications">
+        Drag the nteract icon to your Applications folder.
+      </Step>
+      <Step title="Launch nteract">
+        Open nteract from Applications. On first launch, you may need to right-click and select "Open" to bypass Gatekeeper.
+      </Step>
+      <Step title="Daemon auto-registration">
+        The first launch automatically registers the runtimed daemon as a system service at `~/Library/LaunchAgents/io.nteract.runtimed.plist`.
+      </Step>
+    </Steps>
+
+    <Note>
+    macOS builds are signed and notarized by Apple for security.
+    </Note>
+
+    ### Verify Installation
+
+    Check that the daemon is running:
+
+    ```bash
+    runt daemon status
+    ```
+
+    You should see output showing the daemon version, PID, and environment pool status.
+  </Tab>
+
+  <Tab title="Windows">
+    ### Windows Installation
+
+    Download the installer:
+
+    ```bash
+    # Download nteract-windows-x64.exe
+    # from GitHub Releases
+    ```
+
+    **Installation steps:**
+
+    <Steps>
+      <Step title="Run the installer">
+        Double-click `nteract-windows-x64.exe` to start the installation wizard.
+      </Step>
+      <Step title="Follow the wizard">
+        Accept the license agreement and choose your installation directory.
+      </Step>
+      <Step title="Launch nteract">
+        The installer creates a desktop shortcut and Start Menu entry.
+      </Step>
+      <Step title="Daemon registration">
+        The daemon is automatically registered as a Windows service.
+      </Step>
+    </Steps>
+
+    <Warning>
+    Windows builds are not currently code signed. You may see a Windows Defender SmartScreen warning on first launch.
+    </Warning>
+
+    ### Verify Installation
+
+    Open PowerShell or Command Prompt and run:
+
+    ```powershell
+    runt daemon status
+    ```
+  </Tab>
+
+  <Tab title="Linux">
+    ### Linux Installation
+
+    Download the AppImage:
+
+    ```bash
+    # Download nteract-linux-x64.AppImage
+    # from GitHub Releases
+    ```
+
+    **Installation steps:**
+
+    <Steps>
+      <Step title="Make executable">
+        ```bash
+        chmod +x nteract-linux-x64.AppImage
+        ```
+      </Step>
+      <Step title="Install system dependencies">
+        nteract Desktop requires GTK and WebKit libraries:
+        
+        ```bash
+        # Ubuntu/Debian
+        sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0
+        
+        # Fedora
+        sudo dnf install gtk3 webkit2gtk4.1
+        
+        # Arch
+        sudo pacman -S gtk3 webkit2gtk
+        ```
+      </Step>
+      <Step title="Run the AppImage">
+        ```bash
+        ./nteract-linux-x64.AppImage
+        ```
+      </Step>
+      <Step title="Daemon registration">
+        The first launch registers the daemon as a systemd user service at `~/.config/systemd/user/runtimed.service`.
+      </Step>
+    </Steps>
+
+    ### Verify Installation
+
+    ```bash
+    runt daemon status
+    
+    # Check systemd service
+    systemctl --user status runtimed.service
+    ```
+
+    <Tip>
+    For easier access, move the AppImage to `~/bin` or `/usr/local/bin` and create a desktop entry.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## CLI-Only Installation
+
+If you only need the `runt` CLI without the desktop app, you can download the standalone binary:
+
+<CodeGroup>
+```bash macOS (Apple Silicon)
+# Download runt-darwin-arm64 from GitHub Releases
+curl -L -o runt https://github.com/nteract/desktop/releases/latest/download/runt-darwin-arm64
+chmod +x runt
+sudo mv runt /usr/local/bin/
+```
+
+```bash macOS (Intel)
+# Download runt-darwin-x64 from GitHub Releases
+curl -L -o runt https://github.com/nteract/desktop/releases/latest/download/runt-darwin-x64
+chmod +x runt
+sudo mv runt /usr/local/bin/
+```
+
+```bash Linux
+# Download runt-linux-x64 from GitHub Releases
+curl -L -o runt https://github.com/nteract/desktop/releases/latest/download/runt-linux-x64
+chmod +x runt
+sudo mv runt /usr/local/bin/
+```
+</CodeGroup>
+
+## Python Bindings
+
+For programmatic access to the daemon from Python:
+
+```bash
+pip install runtimed
+```
+
+The Python package provides bindings for notebook execution, kernel management, and daemon control.
+
+See the [Python Bindings guide](/guides/python-bindings) for detailed usage.
+
+## Release Channels
+
+nteract Desktop offers multiple release streams:
+
+| Stream | Tag Pattern | Update Frequency | Purpose |
+|--------|-------------|------------------|----------|
+| **Stable** | `v{semver}` | Manual releases | Production use |
+| **Weekly Preview** | `v{version}-preview.{sha}` | Every Monday | Test upcoming features |
+| **Nightly** | `v{version}-nightly.{sha}` | Daily | Bleeding edge development |
+
+<Note>
+Weekly and nightly builds are published as GitHub Pre-releases. They're less stable but include the latest features and fixes.
+</Note>
+
+## What's Installed
+
+The desktop app installation includes:
+
+- **nteract Desktop** — The GUI application
+- **runt CLI** — Command-line interface
+- **runtimed daemon** — Background service
+- **sidecar** — Output viewer (bundled with the desktop app)
+
+## Daemon Configuration
+
+The daemon runs as a system service and stores state in:
+
+<CodeGroup>
+```bash macOS
+# Daemon state and logs
+~/Library/Caches/runt/
+
+# Configuration
+~/.config/runt/
+
+# LaunchAgent plist
+~/Library/LaunchAgents/io.nteract.runtimed.plist
+```
+
+```bash Linux
+# Daemon state and logs
+~/.cache/runt/
+
+# Configuration
+~/.config/runt/
+
+# Systemd service
+~/.config/systemd/user/runtimed.service
+```
+
+```powershell Windows
+# Daemon state and logs
+%LOCALAPPDATA%\runt\
+
+# Configuration
+%APPDATA%\runt\
+```
+</CodeGroup>
+
+## Upgrading
+
+To upgrade to a new version:
+
+<Steps>
+  <Step title="Download the new release">
+    Get the latest release from GitHub for your platform.
+  </Step>
+  <Step title="Install over existing">
+    Installing the new version automatically stops the old daemon and replaces binaries.
+  </Step>
+  <Step title="Verify upgrade">
+    ```bash
+    runt daemon status
+    ```
+    Check that the version matches your download.
+  </Step>
+</Steps>
+
+<Warning>
+Your notebooks, environments, and settings are preserved during upgrades. The daemon state directory is never deleted.
+</Warning>
+
+## Uninstalling
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    # Stop and unload the daemon
+    launchctl bootout gui/$(id -u)/io.nteract.runtimed
+    
+    # Remove the app
+    rm -rf /Applications/nteract.app
+    
+    # Remove daemon config (optional)
+    rm ~/Library/LaunchAgents/io.nteract.runtimed.plist
+    
+    # Remove all data (optional)
+    rm -rf ~/Library/Caches/runt
+    rm -rf ~/.config/runt
+    ```
+  </Tab>
+  <Tab title="Linux">
+    ```bash
+    # Stop the daemon service
+    systemctl --user stop runtimed.service
+    systemctl --user disable runtimed.service
+    
+    # Remove the AppImage
+    rm nteract-linux-x64.AppImage
+    
+    # Remove daemon config (optional)
+    rm ~/.config/systemd/user/runtimed.service
+    
+    # Remove all data (optional)
+    rm -rf ~/.cache/runt
+    rm -rf ~/.config/runt
+    ```
+  </Tab>
+  <Tab title="Windows">
+    Use the Windows "Add or Remove Programs" interface to uninstall nteract Desktop.
+    
+    To remove all data:
+    ```powershell
+    rmdir /s %LOCALAPPDATA%\runt
+    rmdir /s %APPDATA%\runt
+    ```
+  </Tab>
+</Tabs>
+
+## Migrating from runt-notebook
+
+If you have an older installation from before the nteract rebrand:
+
+<Steps>
+  <Step title="Stop the old daemon">
+    <CodeGroup>
+    ```bash macOS
+    launchctl bootout gui/$(id -u)/io.runtimed
+    ```
+    
+    ```bash Linux
+    systemctl --user stop runtimed.service
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Remove old service config">
+    <CodeGroup>
+    ```bash macOS
+    rm ~/Library/LaunchAgents/io.runtimed.plist
+    ```
+    
+    ```bash Linux
+    rm ~/.config/systemd/user/runtimed.service
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Remove old settings (optional)">
+    Old settings are recreated with defaults:
+    
+    <CodeGroup>
+    ```bash macOS
+    rm -rf ~/Library/Application\ Support/runt-notebook
+    ```
+    
+    ```bash Linux
+    rm -rf ~/.config/runt-notebook
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Install nteract Desktop">
+    Download and install from GitHub Releases. The new daemon registers automatically.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Learn how to open and run your first notebook
+  </Card>
+  <Card title="Settings" icon="gear" href="/guides/settings">
+    Configure default runtime and environment preferences
+  </Card>
+</CardGroup>

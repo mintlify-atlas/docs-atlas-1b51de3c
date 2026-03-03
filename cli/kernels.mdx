@@ -1,0 +1,330 @@
+---
+title: Kernel Management
+description: Standalone Jupyter kernel lifecycle commands
+---
+
+The `runt jupyter` commands manage standalone Jupyter kernels (launched outside of the notebook app).
+
+<Note>
+These commands are for **standalone kernels** started with `runt jupyter start`. Kernels managed by the daemon (from notebook app) are listed with `runt notebooks` instead.
+</Note>
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `ps` | List running kernels |
+| `start` | Start a new kernel |
+| `stop` | Stop a kernel by ID |
+| `interrupt` | Send interrupt signal to a kernel |
+| `exec` | Execute code in a running kernel |
+| `console` | Launch interactive console (see [Console](/cli/console)) |
+| `clean` | Remove stale connection files |
+| `sidecar` | Launch sidecar viewer for a kernel |
+
+## runt jupyter ps
+
+List all running kernels (both standalone and daemon-managed).
+
+```bash
+runt jupyter ps [--json] [--verbose]
+```
+
+### Options
+
+<ParamField query="json" type="boolean" optional>
+  Output in JSON format
+</ParamField>
+
+<ParamField query="verbose" type="boolean" optional>
+  Show port numbers and connection file paths
+</ParamField>
+
+### Example Output
+
+```
+$ runt jupyter ps
+╭─────────────┬──────────┬────────┬──────────┬────────────────────────────╮
+│ NAME        │ LANGUAGE │ STATUS │ SOURCE   │ NOTEBOOK                   │
+├─────────────┼──────────┼────────┼──────────┼────────────────────────────┤
+│ python      │ python   │ idle   │ runtimed │ ~/notebooks/analysis.ipynb │
+│ deno        │ deno     │ idle   │ runtimed │ ~/notebooks/script.ipynb   │
+│ jovial-goat │ python   │ alive  │ jupyter  │ -                          │
+╰─────────────┴──────────┴────────┴──────────┴────────────────────────────╯
+```
+
+- **SOURCE**: `runtimed` = daemon-managed, `jupyter` = standalone kernel
+- **NOTEBOOK**: Only shown for daemon-managed kernels
+
+### Verbose Output
+
+```bash
+$ runt jupyter ps --verbose
+```
+
+Shows connection details:
+
+```
+╭──────────────┬──────────┬────────┬───────┬───────┬───────┬──────┬────┬──────────────────────────────╮
+│ NAME         │ LANGUAGE │ STATUS │ SHELL │ IOPUB │ STDIN │ CTRL │ HB │ CONNECTION FILE              │
+├──────────────┼──────────┼────────┼───────┼───────┼───────┼──────┼────┼──────────────────────────────┤
+│ jovial-goat  │ python   │ alive  │ 52311 │ 52312 │ 52313 │ 5231 │ 52 │ ~/.../runt-kernel-jovial-... │
+╰──────────────┴──────────┴────────┴───────┴───────┴───────┴──────┴────┴──────────────────────────────╯
+```
+
+## runt jupyter start
+
+Start a standalone kernel.
+
+```bash
+runt jupyter start <NAME>
+```
+
+### Arguments
+
+<ParamField path="NAME" type="string" required>
+  Kernel name to launch (e.g., `python3`, `julia`, `deno`).
+  
+  Must be a valid kernelspec installed on the system. List available kernelspecs with `jupyter kernelspec list`.
+</ParamField>
+
+### Example
+
+```bash
+$ runt jupyter start python3
+Kernel started with ID: jovial-goat
+Connection file: ~/.local/share/jupyter/runtime/runt-kernel-jovial-goat.json
+```
+
+The kernel runs in the background and can be used with:
+- `runt jupyter exec` — Execute code
+- External Jupyter clients (connect via the connection file)
+- `runt jupyter sidecar` — View outputs
+
+## runt jupyter stop
+
+Stop a running kernel.
+
+```bash
+runt jupyter stop <ID>
+runt jupyter stop --all
+```
+
+### Arguments
+
+<ParamField path="ID" type="string" optional>
+  Kernel ID to stop (from `runt jupyter ps`).
+  
+  Required unless `--all` is used.
+</ParamField>
+
+### Options
+
+<ParamField query="all" type="boolean" optional>
+  Stop all running standalone kernels.
+</ParamField>
+
+### Examples
+
+```bash
+# Stop specific kernel
+$ runt jupyter stop jovial-goat
+Kernel with ID jovial-goat stopped
+
+# Stop all kernels
+$ runt jupyter stop --all
+Stopped jovial-goat
+Stopped happy-duck
+
+Stopped 2 kernel(s)
+```
+
+## runt jupyter interrupt
+
+Send an interrupt signal to a running kernel (equivalent to Ctrl+C).
+
+```bash
+runt jupyter interrupt <ID>
+```
+
+### Arguments
+
+<ParamField path="ID" type="string" required>
+  Kernel ID to interrupt.
+</ParamField>
+
+### Example
+
+```bash
+$ runt jupyter interrupt jovial-goat
+Interrupt sent to kernel jovial-goat
+```
+
+Use this to stop long-running computations without killing the kernel.
+
+## runt jupyter exec
+
+Execute code in a running kernel.
+
+```bash
+runt jupyter exec <ID> [CODE]
+```
+
+### Arguments
+
+<ParamField path="ID" type="string" required>
+  Kernel ID to execute code in.
+</ParamField>
+
+<ParamField path="CODE" type="string" optional>
+  Code to execute. If omitted, reads from stdin.
+</ParamField>
+
+### Examples
+
+#### Execute inline code
+
+```bash
+$ runt jupyter exec jovial-goat "print('Hello, World!')"
+Hello, World!
+```
+
+#### Execute from stdin
+
+```bash
+$ echo "import numpy as np; print(np.__version__)" | runt jupyter exec jovial-goat
+1.26.0
+```
+
+#### Execute from file
+
+```bash
+$ runt jupyter exec jovial-goat < script.py
+```
+
+### Output Handling
+
+- **stdout**: Printed to terminal
+- **stderr**: Printed to terminal (in red if supported)
+- **Return values**: Displayed as plain text
+- **Errors**: Full traceback shown
+
+### Exit Codes
+
+- `0`: Code executed successfully
+- `1`: Execution error (exception raised)
+
+## runt jupyter clean
+
+Remove stale kernel connection files.
+
+```bash
+runt jupyter clean [--timeout SECS] [--dry-run]
+```
+
+### Options
+
+<ParamField query="timeout" type="number" default="2">
+  Timeout in seconds for heartbeat check when determining if a kernel is alive.
+</ParamField>
+
+<ParamField query="dry-run" type="boolean" optional>
+  Show what would be removed without actually deleting files.
+</ParamField>
+
+### Example
+
+```bash
+$ runt jupyter clean
+Removed: ~/.local/share/jupyter/runtime/kernel-12345.json
+Removed: ~/.local/share/jupyter/runtime/runt-kernel-old-kernel.json
+
+Cleaned 2 stale connection files (3 alive, 0 errors)
+```
+
+### Dry Run
+
+```bash
+$ runt jupyter clean --dry-run
+Would remove: ~/.local/share/jupyter/runtime/kernel-12345.json
+Would remove: ~/.local/share/jupyter/runtime/runt-kernel-old-kernel.json
+
+Dry run complete: 2 stale, 3 alive, 0 errors
+```
+
+## Connection Files
+
+Standalone kernels create connection files at:
+
+```
+~/.local/share/jupyter/runtime/runt-kernel-{id}.json
+```
+
+These files contain:
+- ZeroMQ port numbers (shell, iopub, stdin, control, heartbeat)
+- IP address and transport protocol
+- HMAC signature key
+
+External Jupyter clients can connect to kernels using these files.
+
+## Advanced: Custom Kernel Commands
+
+For kernels without a kernelspec, use `runt console --cmd` instead:
+
+```bash
+runt console --cmd "deno jupyter --kernel --conn {connection_file}"
+```
+
+This launches an interactive console. See [Console](/cli/console) for details.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Kernelspec not found">
+    **Error**: `Kernelspec 'python3' not found`
+    
+    **Solution**:
+    1. List installed kernelspecs: `jupyter kernelspec list`
+    2. Install the missing kernel:
+       ```bash
+       # Python
+       pip install ipykernel
+       python -m ipykernel install --user
+       
+       # Deno
+       deno jupyter --install
+       
+       # Julia
+       # Run in Julia REPL:
+       using Pkg; Pkg.add("IJulia")
+       ```
+  </Accordion>
+  
+  <Accordion title="Can't connect to kernel">
+    **Error**: Connection timeout or "kernel not found"
+    
+    **Solution**:
+    1. Verify kernel is running: `runt jupyter ps`
+    2. Check the kernel ID matches exactly
+    3. Look for errors in kernel output (kernels log to terminal by default)
+  </Accordion>
+  
+  <Accordion title="Stale connection files">
+    **Symptoms**: `runt jupyter ps` shows dead kernels, or connection files left after crashes
+    
+    **Solution**:
+    ```bash
+    # Clean up automatically
+    runt jupyter clean
+    
+    # Or manually remove
+    rm ~/.local/share/jupyter/runtime/runt-kernel-*.json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+- `runt console` — Interactive REPL (easier than start + exec)
+- `runt notebooks` — List daemon-managed kernels
+- `runt shutdown` — Shutdown a notebook's kernel

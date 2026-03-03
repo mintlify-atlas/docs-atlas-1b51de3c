@@ -1,0 +1,289 @@
+---
+title: "Daemon API Overview"
+description: "Learn how to communicate with the nteract Desktop runtime daemon (runtimed)"
+---
+
+## Introduction
+
+The nteract Desktop runtime daemon (`runtimed`) is a singleton background process that manages:
+
+- **Environment pools** - Prewarmed Python environments (UV and Conda) for instant notebook startup
+- **CRDT sync** - Real-time notebook document synchronization across windows using Automerge
+- **Blob storage** - Content-addressed storage for notebook outputs (images, HTML, large data)
+- **Kernel execution** - Daemon-owned kernels for multi-window notebook sharing (experimental)
+
+## Architecture
+
+```
+┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
+│  Notebook Win 1  │   │  Notebook Win 2  │   │  Notebook Win N  │
+│  (Tauri process) │   │  (Tauri process) │   │  (Tauri process) │
+└────────┬─────────┘   └────────┬─────────┘   └────────┬─────────┘
+         │                      │                      │
+         │     Unix Socket      │     Unix Socket      │
+         └──────────┬───────────┴───────────┬──────────┘
+                    │                       │
+                    ▼                       ▼
+              ┌─────────────────────────────────┐
+              │            runtimed             │
+              │      (singleton daemon)         │
+              │                                 │
+              │  ┌──────────┐  ┌──────────────┐ │
+              │  │ UV Pool  │  │  Conda Pool  │ │
+              │  │ (3 envs) │  │   (3 envs)   │ │
+              │  └──────────┘  └──────────────┘ │
+              │                                 │
+              │  ┌──────────────────────────┐   │
+              │  │ Blob Store (HTTP)        │   │
+              │  │ http://127.0.0.1:port    │   │
+              │  └──────────────────────────┘   │
+              └─────────────────────────────────┘
+```
+
+## Communication Channels
+
+All daemon communication goes through a single Unix socket (`~/.cache/runt/runtimed.sock` on Linux, `~/Library/Caches/runt/runtimed.sock` on macOS) with channel-based routing.
+
+### Handshake Protocol
+
+Every connection starts with a JSON handshake declaring the channel:
+
+```json
+// Pool operations
+{"channel": "pool"}
+
+// Settings sync
+{"channel": "settings_sync"}
+
+// Notebook document sync
+{
+  "channel": "notebook_sync",
+  "notebook_id": "/path/to/notebook.ipynb",
+  "protocol": "v2",
+  "working_dir": "/path/to/project"
+}
+
+// Blob storage
+{"channel": "blob"}
+```
+
+<Note>
+The handshake frame is sent using [length-prefixed binary framing](/api/daemon/ipc-protocol#binary-framing). See the IPC Protocol documentation for details.
+</Note>
+
+## Available Channels
+
+### Pool Channel
+
+**Purpose**: Acquire and return prewarmed Python environments
+
+**Lifetime**: Short-lived request/response
+
+**Protocol**: Length-framed JSON
+
+**Operations**:
+- `Take` - Acquire a UV or Conda environment from the pool
+- `Return` - Return an environment to the pool
+- `Status` - Get pool statistics (available, warming)
+- `Ping` - Health check
+- `Shutdown` - Graceful daemon shutdown
+- `FlushPool` - Drain and rebuild all environments
+
+See [IPC Protocol](/api/daemon/ipc-protocol) for request/response formats.
+
+### SettingsSync Channel
+
+**Purpose**: Real-time synchronization of user preferences
+
+**Lifetime**: Long-lived, bidirectional
+
+**Protocol**: Automerge sync messages
+
+**How it works**:
+1. Client connects and exchanges Automerge sync messages with daemon
+2. Daemon holds canonical document, persisted to `~/.cache/runt/settings.automerge`
+3. Changes from any peer are broadcast to all connected windows
+4. Daemon watches `~/.config/nteract/settings.json` for external edits
+
+### NotebookSync Channel
+
+**Purpose**: Real-time notebook document synchronization
+
+**Lifetime**: Long-lived, bidirectional
+
+**Protocol**: Automerge sync messages + JSON requests/responses/broadcasts
+
+**Room architecture**:
+- Each notebook gets a "room" in the daemon
+- Multiple windows editing the same notebook sync through the room's canonical document
+- Rooms persist documents to `~/.cache/runt/notebook-docs/{sha256(notebook_id)}.automerge`
+- Last peer disconnect evicts the room (document already on disk)
+
+**Protocol versions**:
+- **v1** (legacy): Raw Automerge frames only
+- **v2** (current): Typed frames with first-byte type indicator
+  - `0x00` - Automerge sync message (binary)
+  - `0x01` - NotebookRequest (JSON)
+  - `0x02` - NotebookResponse (JSON)
+  - `0x03` - NotebookBroadcast (JSON)
+
+### Blob Channel
+
+**Purpose**: Write blobs to content-addressed storage
+
+**Lifetime**: Short-lived
+
+**Protocol**: Binary framing
+
+**Flow**:
+```
+Client -> Server:
+  Frame 1: Handshake       {"channel": "blob"}
+  Frame 2: JSON request    {"action": "store", "media_type": "image/png"}
+  Frame 3: Raw binary      <the actual blob bytes>
+
+Server -> Client:
+  Frame 1: JSON response   {"hash": "a1b2c3d4..."}
+```
+
+See [Blob Store API](/api/daemon/blob-store) for HTTP read endpoints.
+
+## Platform Paths
+
+The daemon uses platform-appropriate directories:
+
+<CodeGroup>
+
+```bash Linux
+# Cache directory
+~/.cache/runt/
+
+# Config directory
+~/.config/runt/
+```
+
+```bash macOS
+# Cache directory
+~/Library/Caches/runt/
+
+# Config directory  
+~/Library/Application Support/runt/
+```
+
+```bash Windows
+# Cache directory
+%LOCALAPPDATA%\runt\
+
+# Config directory
+%APPDATA%\runt\
+```
+
+</CodeGroup>
+
+## Singleton Management
+
+Only one daemon runs per user. A file lock ensures mutual exclusion:
+
+**Lock file**: `~/.cache/runt/daemon.lock`
+
+**Info file**: `~/.cache/runt/daemon.json`
+
+```json
+{
+  "endpoint": "unix:///Users/username/.cache/runt/runtimed.sock",
+  "pid": 12345,
+  "version": "0.1.0",
+  "started_at": "2026-03-03T12:00:00Z",
+  "blob_port": 54321,
+  "worktree_path": null,
+  "workspace_description": null
+}
+```
+
+<ParamField path="endpoint" type="string" required>
+  Unix socket path for IPC
+</ParamField>
+
+<ParamField path="pid" type="number" required>
+  Process ID of the daemon
+</ParamField>
+
+<ParamField path="version" type="string" required>
+  Daemon binary version
+</ParamField>
+
+<ParamField path="started_at" type="string" required>
+  ISO 8601 timestamp when daemon started
+</ParamField>
+
+<ParamField path="blob_port" type="number">
+  HTTP server port for blob reads (if blob server is running)
+</ParamField>
+
+<ParamField path="worktree_path" type="string">
+  Git worktree path (development mode only)
+</ParamField>
+
+<ParamField path="workspace_description" type="string">
+  Human-readable workspace description (development mode only)
+</ParamField>
+
+## Security Model
+
+### Write Operations (Unix Socket)
+
+**Authentication**: Filesystem permissions on the socket
+
+**Access**: Only processes running as the same user can connect
+
+**Mechanism**: Unix domain socket or named pipe (Windows)
+
+### Read Operations (HTTP)
+
+**Authentication**: None (unauthenticated localhost HTTP)
+
+**Why this is safe**:
+- Content-addressed with 256-bit SHA-256 hashes (not guessable)
+- Read-only endpoint
+- Non-secret data (notebook outputs the user produced locally)
+- Binds to `127.0.0.1` only (localhost)
+
+## Client Libraries
+
+The daemon provides Rust client libraries:
+
+```rust
+use runtimed::client::PoolClient;
+use runtimed::sync_client::SettingsSyncClient;
+use runtimed::notebook_sync_client::NotebookSyncClient;
+
+// Pool operations
+let client = PoolClient::connect(None).await?;
+let env = client.take(EnvType::Uv).await?;
+
+// Settings sync
+let sync_client = SettingsSyncClient::connect(None).await?;
+loop {
+    if let Some(change) = sync_client.recv_changes().await? {
+        // Handle settings change
+    }
+}
+
+// Notebook sync
+let notebook_client = NotebookSyncClient::connect(
+    "/path/to/notebook.ipynb",
+    None
+).await?;
+notebook_client.update_source("cell-id", "print('hello')").await?;
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="IPC Protocol" icon="message" href="/api/daemon/ipc-protocol">
+    Learn about the Unix socket IPC protocol, framing, and message formats
+  </Card>
+  <Card title="Blob Store API" icon="database" href="/api/daemon/blob-store">
+    Explore the HTTP blob storage API for content-addressed outputs
+  </Card>
+</CardGroup>

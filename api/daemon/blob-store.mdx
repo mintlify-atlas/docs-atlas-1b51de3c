@@ -1,0 +1,475 @@
+---
+title: "Blob Store API"
+description: "HTTP API for content-addressed blob storage"
+---
+
+## Overview
+
+The blob store provides content-addressed storage for notebook outputs (images, HTML, rich data). It has two components:
+
+1. **Write API** - Unix socket IPC for storing blobs (see [IPC Protocol](/api/daemon/ipc-protocol#blob-channel))
+2. **Read API** - HTTP server for retrieving blobs (this page)
+
+## Architecture
+
+```
+Write Path (IPC):
+  Notebook -> Unix Socket -> Daemon -> Blob Store -> Disk
+
+Read Path (HTTP):
+  Browser -> HTTP GET -> Blob Server -> Blob Store -> Disk
+```
+
+### On-Disk Layout
+
+```
+~/.cache/runt/blobs/
+  a1/
+    b2c3d4e5f6...           # raw bytes (SHA-256 hash)
+    b2c3d4e5f6....meta      # JSON metadata sidecar
+  f3/
+    4567890abc...
+    4567890abc....meta
+```
+
+**Sharding**: Two-character prefix directories prevent filesystem bottlenecks.
+
+**Metadata sidecar** (`.meta` file):
+
+```json
+{
+  "media_type": "image/png",
+  "size": 45000,
+  "created_at": "2026-03-03T12:00:00Z"
+}
+```
+
+## HTTP Server
+
+The daemon runs an HTTP server on `127.0.0.1:0` (random OS-assigned port).
+
+**Endpoint**: `http://127.0.0.1:{port}` where `{port}` is advertised in `daemon.json`
+
+```json daemon.json
+{
+  "endpoint": "unix:///Users/username/.cache/runt/runtimed.sock",
+  "pid": 12345,
+  "blob_port": 54321,
+  ...
+}
+```
+
+## Endpoints
+
+### GET /health
+
+Health check endpoint.
+
+<CodeGroup>
+
+```bash Request
+curl http://127.0.0.1:54321/health
+```
+
+```text Response
+OK
+```
+
+</CodeGroup>
+
+<ResponseField name="Status Code" type="number">
+  200
+</ResponseField>
+
+### GET /blob/:hash
+
+Retrieve blob by SHA-256 hash.
+
+<ParamField path="hash" type="string" required>
+  64-character hex SHA-256 hash
+</ParamField>
+
+<CodeGroup>
+
+```bash Request
+curl http://127.0.0.1:54321/blob/a1b2c3d4e5f6789...
+```
+
+```bash Not Found
+curl http://127.0.0.1:54321/blob/0000000000000000...
+# Returns 404 Not Found
+```
+
+</CodeGroup>
+
+#### Success Response (200)
+
+<ResponseField name="Content-Type" type="string">
+  Media type from metadata sidecar (e.g., `image/png`, `text/html`). Falls back to `application/octet-stream` if metadata is missing.
+</ResponseField>
+
+<ResponseField name="Content-Length" type="number">
+  Blob size in bytes
+</ResponseField>
+
+<ResponseField name="Cache-Control" type="string">
+  `public, max-age=31536000, immutable`
+  
+  Content-addressed blobs never change, so cache aggressively.
+</ResponseField>
+
+<ResponseField name="Access-Control-Allow-Origin" type="string">
+  `*`
+  
+  CORS enabled for cross-origin requests from notebook renderers.
+</ResponseField>
+
+<ResponseField name="Body" type="binary">
+  Raw blob bytes
+</ResponseField>
+
+#### Error Response (404)
+
+Returned when the hash is not found in the blob store.
+
+```text
+Not Found
+```
+
+## Usage Examples
+
+### Rendering an Image
+
+```html
+<img src="http://127.0.0.1:54321/blob/a1b2c3d4e5f6789..." />
+```
+
+### Fetching HTML Output
+
+```typescript
+const response = await fetch(
+  `http://127.0.0.1:${blobPort}/blob/${hash}`
+);
+const html = await response.text();
+document.getElementById('output').innerHTML = html;
+```
+
+### Streaming Large Data
+
+```typescript
+const response = await fetch(
+  `http://127.0.0.1:${blobPort}/blob/${hash}`
+);
+const reader = response.body.getReader();
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  // Process chunk
+}
+```
+
+## Content Addressing
+
+### Hash Calculation
+
+Blobs are identified by SHA-256 hash of the raw bytes:
+
+```rust
+use sha2::{Sha256, Digest};
+
+let hash = hex::encode(Sha256::digest(blob_bytes));
+// Example: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234"
+```
+
+**Properties**:
+- Same bytes always produce the same hash
+- Media type does NOT affect the hash
+- 256-bit hashes are cryptographically unguessable
+
+### Validation
+
+Valid hashes must be:
+- Exactly 64 characters long
+- Hex digits only (`0-9a-f`)
+
+Invalid hashes return `404 Not Found`.
+
+## Write Operations
+
+Blobs are written via the Unix socket (see [IPC Protocol](/api/daemon/ipc-protocol#blob-channel)):
+
+```
+1. Connect to Unix socket
+2. Send handshake: {"channel": "blob"}
+3. Send request: {"action": "store", "media_type": "image/png"}
+4. Send raw binary data
+5. Receive response: {"hash": "a1b2c3d4..."}
+```
+
+### Size Limit
+
+<ParamField path="MAX_BLOB_SIZE" type="number" default="104857600">
+  Maximum blob size: 100 MiB
+</ParamField>
+
+Attempts to store larger blobs are rejected with an error.
+
+### Atomic Writes
+
+Blobs are written atomically:
+
+1. Write to temp file: `.tmp.{uuid}`
+2. Rename to final path: `{hash}`
+
+Concurrent writes of identical content are safe (same hash = same file).
+
+## Output Manifests (Phase 6)
+
+Notebook outputs use a two-level storage strategy:
+
+1. **Output manifests** - Jupyter output structure with ContentRef for data
+2. **Blobs** - Raw content referenced by manifests
+
+### ContentRef
+
+Content can be inlined or stored as a blob:
+
+```json Inline (< 8KB)
+{
+  "inline": "hello world"
+}
+```
+
+```json Blob (>= 8KB)
+{
+  "blob": "a1b2c3d4e5f6789...",
+  "size": 45000
+}
+```
+
+### Display Data Manifest
+
+```json
+{
+  "output_type": "display_data",
+  "data": {
+    "text/plain": {
+      "inline": "Red Pixel"
+    },
+    "image/png": {
+      "blob": "a1b2c3d4e5f6789...",
+      "size": 45000
+    }
+  },
+  "metadata": {
+    "image/png": {
+      "width": 640,
+      "height": 480
+    }
+  }
+}
+```
+
+### Stream Output Manifest
+
+```json Small Log (inline)
+{
+  "output_type": "stream",
+  "name": "stdout",
+  "text": {
+    "inline": "Training epoch 1/10\n"
+  }
+}
+```
+
+```json Large Log (blob)
+{
+  "output_type": "stream",
+  "name": "stdout",
+  "text": {
+    "blob": "c3d4e5f6789...",
+    "size": 2097152
+  }
+}
+```
+
+### Error Output Manifest
+
+```json
+{
+  "output_type": "error",
+  "ename": "ValueError",
+  "evalue": "invalid literal for int()",
+  "traceback": {
+    "inline": "[\"Traceback (most recent call last):\", ...]"
+  }
+}
+```
+
+### Inlining Threshold
+
+<ParamField path="DEFAULT_INLINE_THRESHOLD" type="number" default="8192">
+  Content smaller than 8 KB is inlined in the manifest. Larger content goes to the blob store.
+</ParamField>
+
+**Why 8 KB?**
+- Most `text/plain` outputs: inline (one request)
+- Most images: blob (two requests)
+- Small stdout: inline
+- Training loop logs: blob
+- Error tracebacks: usually inline (1-5 KB)
+
+### Manifest Storage
+
+Manifests are themselves stored as blobs with media type `application/x-jupyter-output+json`:
+
+```
+1. Create manifest JSON from Jupyter output
+2. Store manifest as blob -> get manifest_hash
+3. Store manifest_hash in CRDT (not full output JSON)
+```
+
+**CRDT document**:
+
+```json
+{
+  "cells": [
+    {
+      "id": "cell-1",
+      "source": "print('hello')",
+      "outputs": [
+        "a1b2c3d4e5f6789..."  // manifest hash, not full output
+      ]
+    }
+  ]
+}
+```
+
+## Security Model
+
+### Why No Authentication?
+
+**Threat model**: We protect against:
+- Remote attackers (server binds to `127.0.0.1` only)
+- Cross-user access (Unix socket permissions control writes)
+
+**What we DON'T protect against**:
+- Local malicious processes reading outputs (they already have full filesystem access)
+- Hash guessing (256-bit SHA-256 hashes are cryptographically unguessable)
+
+### Why CORS is Enabled
+
+Notebook outputs render in sandboxed iframes. CORS headers allow the iframe to fetch blobs from the localhost HTTP server:
+
+```typescript
+// Inside sandboxed iframe
+fetch(`http://127.0.0.1:${blobPort}/blob/${hash}`)
+  .then(r => r.blob())
+  .then(blob => {
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(blob);
+    document.body.appendChild(img);
+  });
+```
+
+## Garbage Collection
+
+**Current strategy**: Manual cleanup only.
+
+Users can clear the cache:
+
+```bash
+rm -rf ~/.cache/runt/blobs/
+```
+
+**Future**: Reference counting or LRU eviction (not implemented yet).
+
+## Performance Characteristics
+
+### Concurrent Reads
+
+- **Safe**: Multiple processes can read simultaneously
+- **Efficient**: OS page cache reduces disk I/O for frequently accessed blobs
+- **No locking**: Content-addressed blobs are immutable
+
+### Concurrent Writes
+
+- **Safe**: Atomic rename ensures partial writes are never visible
+- **Idempotent**: Writing the same content twice is a no-op (same hash)
+- **Race handling**: On Windows, `rename` fails if target exists. This is detected and treated as success (concurrent writer placed identical content).
+
+### Sharding
+
+Two-character prefix directories prevent filesystem bottlenecks:
+
+- 256 possible shards (`00` through `ff`)
+- Evenly distributes load across directories
+- Typical notebook: ~100 blobs → ~0.4 blobs per shard on average
+
+## Rust API
+
+The daemon's `BlobStore` Rust API:
+
+```rust
+use runtimed::blob_store::{BlobStore, BlobMeta};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let store = BlobStore::new(
+        std::path::PathBuf::from("/Users/username/.cache/runt/blobs")
+    );
+    
+    // Store a blob
+    let data = b"hello world";
+    let hash = store.put(data, "text/plain").await?;
+    println!("Stored as {}", hash);
+    
+    // Retrieve blob
+    let retrieved = store.get(&hash).await?.unwrap();
+    assert_eq!(retrieved, data);
+    
+    // Get metadata
+    let meta = store.get_meta(&hash).await?.unwrap();
+    println!("Media type: {}", meta.media_type);
+    println!("Size: {} bytes", meta.size);
+    
+    // Check existence
+    if store.exists(&hash) {
+        println!("Blob exists");
+    }
+    
+    // List all blobs
+    let hashes = store.list().await?;
+    println!("Total blobs: {}", hashes.len());
+    
+    // Delete blob
+    store.delete(&hash).await?;
+    
+    Ok(())
+}
+```
+
+## Migration Guide: Phase 5 → Phase 6
+
+The outputs list in the CRDT document uses `List of Str`. The format is auto-detected:
+
+**Phase 5** (legacy): JSON string
+```json
+"outputs": [
+  "{\"output_type\":\"stream\",\"name\":\"stdout\",\"text\":\"hello\\n\"}"
+]
+```
+
+**Phase 6** (current): Manifest hash
+```json
+"outputs": [
+  "a1b2c3d4e5f6789012345678901234567890123456789012345678901234"
+]
+```
+
+**Detection logic**:
+- String starts with `{` and parses as JSON → Phase 5 inline JSON
+- String is 64 hex characters → Phase 6 manifest hash
+
+No migration step needed. Old and new outputs coexist.

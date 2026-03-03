@@ -1,0 +1,338 @@
+---
+title: Release Process
+description: How releases are built, tagged, and published for nteract Desktop
+---
+
+This guide covers the release process for both the desktop app and the Python package.
+
+## Release Streams
+
+nteract Desktop has multiple release streams for different audiences:
+
+| Stream | Tag | Trigger | Destination |
+|--------|-----|---------|-------------|
+| **Weekly preview** | `v{version}-preview.{sha}` | Cron (Monday 9am UTC) or manual | GitHub Releases |
+| **Nightly** | `v{version}-nightly.{sha}` | Cron (daily, 24h cadence) or manual | GitHub Pre-releases |
+| **Stable desktop** | `v{semver}` | Manual `workflow_dispatch` | GitHub Releases |
+| **Python package** | `python-v{semver}` | Manual tag push | PyPI + GitHub Releases |
+
+## Desktop App Release
+
+The desktop app, `runt` CLI, `runtimed` daemon, and `sidecar` are all built and released together.
+
+### Automated Releases
+
+**Weekly Preview** — Runs every Monday at 9am UTC:
+- Triggers: `.github/workflows/releases/weekly.yml`
+- Uses: `.github/workflows/releases/release-common.yml` (reusable workflow)
+- Tag format: `v{version}-preview.{sha}`
+- Published to GitHub Releases
+
+**Nightly** — Runs every 24 hours:
+- Triggers: `.github/workflows/releases/nightly.yml`
+- Uses: `.github/workflows/releases/release-common.yml` (reusable workflow)
+- Tag format: `v{version}-nightly.{sha}`
+- Published to GitHub Pre-releases
+
+Both can also be triggered manually via GitHub Actions `workflow_dispatch`.
+
+### Artifacts
+
+| Platform | File |
+|----------|------|
+| macOS ARM64 (Apple Silicon) | `nteract-darwin-arm64.dmg` |
+| macOS x64 (Intel) | `nteract-darwin-x64.dmg` |
+| Windows x64 | `nteract-windows-x64.exe` |
+| Linux x64 | `nteract-linux-x64.AppImage` |
+| CLI (macOS ARM64) | `runt-darwin-arm64` |
+| CLI (macOS x64) | `runt-darwin-x64` |
+| CLI (Linux x64) | `runt-linux-x64` |
+
+<Note>
+macOS builds are signed and notarized. Windows builds are not code signed.
+</Note>
+
+### Manual Stable Release
+
+For stable releases, maintainers trigger the workflow manually:
+
+<Steps>
+  <Step title="Bump version in Cargo.toml">
+    Update the version in the root `Cargo.toml`:
+    
+    ```toml
+    [workspace.package]
+    version = "0.5.0"
+    ```
+  </Step>
+  
+  <Step title="Create and merge PR">
+    Open a PR with the version bump:
+    
+    ```bash
+    git checkout -b release/v0.5.0
+    # Edit Cargo.toml
+    git commit -am "chore: bump version to 0.5.0"
+    git push origin release/v0.5.0
+    ```
+    
+    Get it reviewed and merged.
+  </Step>
+  
+  <Step title="Tag and push">
+    ```bash
+    git checkout main
+    git pull
+    git tag v0.5.0
+    git push origin v0.5.0
+    ```
+  </Step>
+  
+  <Step title="Trigger workflow">
+    Go to [GitHub Actions](https://github.com/nteract/desktop/actions) and manually trigger the release workflow with the tag.
+  </Step>
+</Steps>
+
+The workflow will:
+- Build for all platforms (macOS ARM64, macOS x64, Windows x64, Linux x64)
+- Sign and notarize macOS builds
+- Create DMGs for macOS
+- Create installers for Windows and Linux
+- Upload artifacts to GitHub Releases
+
+## Python Package Release
+
+The `runtimed` Python package provides bindings for the daemon and is released separately.
+
+### Package Location
+
+The Python package lives at `python/runtimed/` and uses [maturin](https://github.com/PyO3/maturin) to build wheels from the `crates/runt/` Rust crate.
+
+### Release Process
+
+<Steps>
+  <Step title="Bump version">
+    Edit `python/runtimed/pyproject.toml`:
+    
+    ```toml
+    [project]
+    name = "runtimed"
+    version = "0.5.0"
+    ```
+  </Step>
+  
+  <Step title="Create and merge PR">
+    ```bash
+    git checkout -b release/python-v0.5.0
+    # Edit pyproject.toml
+    git commit -am "chore(python): bump version to 0.5.0"
+    git push origin release/python-v0.5.0
+    ```
+    
+    Get it reviewed and merged.
+  </Step>
+  
+  <Step title="Tag and push">
+    ```bash
+    git checkout main
+    git pull
+    git tag python-v0.5.0
+    git push origin python-v0.5.0
+    ```
+  </Step>
+  
+  <Step title="Workflow triggers automatically">
+    The `python-package.yml` workflow triggers on `python-v*` tags.
+  </Step>
+</Steps>
+
+The workflow will:
+- Build wheels for macOS (arm64 + x64)
+- Publish to PyPI via trusted publishing (OIDC)
+- Create a GitHub release with wheels and `runt` binaries
+
+<Note>
+PyPI publishing uses OIDC trusted publishing, so no API tokens are needed in repository secrets.
+</Note>
+
+## Building from Source (Development)
+
+For local development and testing:
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    pnpm install
+    ```
+  </Step>
+  
+  <Step title="Build">
+    ```bash
+    cargo xtask build
+    ```
+    
+    This builds the frontend and Rust code in debug mode.
+  </Step>
+  
+  <Step title="Run">
+    ```bash
+    cargo xtask run
+    ```
+  </Step>
+</Steps>
+
+See [Building from Source](/development/building) for detailed instructions.
+
+## Testing with Local Library Changes
+
+To test against unpublished changes to `runtimelib` or `jupyter-protocol`, add to the root `Cargo.toml`:
+
+```toml
+[patch.crates-io]
+runtimelib = { path = "../runtimed/crates/runtimelib" }
+jupyter-protocol = { path = "../runtimed/crates/jupyter-protocol" }
+```
+
+This allows you to test changes to these libraries before publishing to crates.io.
+
+## Crate Publishing
+
+<Warning>
+`runt-cli` and `sidecar` are **not published to crates.io** (`publish = false` in Cargo.toml).
+
+Sidecar embeds UI assets from `apps/sidecar/dist/` via `rust-embed`, which requires files outside the crate directory.
+</Warning>
+
+Published crates:
+- [`jupyter-protocol`](https://crates.io/crates/jupyter-protocol) — Jupyter messaging protocol
+- [`runtimelib`](https://crates.io/crates/runtimelib) — Jupyter kernel interactions over ZeroMQ
+- [`nbformat`](https://crates.io/crates/nbformat) — Notebook parsing
+
+## Release Checklist
+
+### Desktop App Stable Release
+
+- [ ] Update version in root `Cargo.toml`
+- [ ] Update CHANGELOG.md with release notes
+- [ ] Create and merge version bump PR
+- [ ] Tag release: `git tag v{version}`
+- [ ] Push tag: `git push origin v{version}`
+- [ ] Trigger GitHub Actions workflow
+- [ ] Verify artifacts are uploaded to GitHub Releases
+- [ ] Test downloads on each platform
+- [ ] Announce release (Twitter, Discord, etc.)
+
+### Python Package Release
+
+- [ ] Update version in `python/runtimed/pyproject.toml`
+- [ ] Create and merge version bump PR
+- [ ] Tag release: `git tag python-v{version}`
+- [ ] Push tag: `git push origin python-v{version}`
+- [ ] Wait for workflow to publish to PyPI
+- [ ] Verify package on PyPI: `pip install runtimed=={version}`
+- [ ] Verify GitHub Release created
+
+## Rollback
+
+If a release has critical issues:
+
+### Desktop App
+
+<Steps>
+  <Step title="Mark release as pre-release">
+    Edit the GitHub Release and check "This is a pre-release".
+  </Step>
+  
+  <Step title="Delete the tag (optional)">
+    ```bash
+    git tag -d v{version}
+    git push origin :refs/tags/v{version}
+    ```
+  </Step>
+  
+  <Step title="Fix the issue">
+    Create a fix PR, merge, and create a new release.
+  </Step>
+</Steps>
+
+### Python Package
+
+<Warning>
+You cannot delete versions from PyPI once published. You can only yank them.
+</Warning>
+
+<Steps>
+  <Step title="Yank the version">
+    ```bash
+    # Requires PyPI credentials
+    pip install twine
+    twine upload --skip-existing --repository pypi dist/*
+    # Then use the PyPI web interface to yank the version
+    ```
+    
+    Or use the PyPI web interface directly.
+  </Step>
+  
+  <Step title="Release a patch version">
+    Bump to the next patch version (e.g., `0.5.0` -> `0.5.1`) and release.
+  </Step>
+</Steps>
+
+## Migration from runt-notebook
+
+If you have an older install from before the nteract rebrand:
+
+```bash
+# 1. Stop old daemon
+launchctl bootout gui/$(id -u)/io.runtimed  # macOS
+systemctl --user stop runtimed.service        # Linux
+
+# 2. Remove old service config
+rm ~/Library/LaunchAgents/io.runtimed.plist   # macOS
+
+# 3. Remove old settings (optional — recreated with defaults)
+rm -rf ~/Library/Application\ Support/runt-notebook  # macOS
+rm -rf ~/.config/runt-notebook                        # Linux
+
+# 4. Install nteract — registers the new daemon automatically
+```
+
+## CI Configuration
+
+Release workflows are in `.github/workflows/releases/`:
+
+| File | Purpose |
+|------|---------||
+| `release-common.yml` | Reusable workflow for building and uploading artifacts |
+| `weekly.yml` | Weekly preview release (Monday 9am UTC) |
+| `nightly.yml` | Nightly pre-release (daily, 24h cadence) |
+| `python-package.yml` | Python package release (triggered by `python-v*` tags) |
+
+See the workflow files for detailed build steps and configuration.
+
+## Signing and Notarization
+
+### macOS
+
+macOS builds are signed and notarized using Apple's developer certificates:
+
+- **Signing:** Uses `codesign` with Apple Developer ID Application certificate
+- **Notarization:** Uses `xcrun notarytool` to submit to Apple's notary service
+- **Stapling:** Attaches the notarization ticket to the DMG
+
+Credentials are stored in GitHub Secrets:
+- `APPLE_CERTIFICATE`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_PASSWORD` (app-specific password)
+
+### Windows
+
+Windows builds are **not currently code signed**. Users may see SmartScreen warnings on first run.
+
+## Next Steps
+
+- [Building from Source](/development/building) - Set up your development environment
+- [Contributing Guidelines](/development/contributing) - Contribution workflow
+- [GitHub Releases](https://github.com/nteract/desktop/releases) - View published releases

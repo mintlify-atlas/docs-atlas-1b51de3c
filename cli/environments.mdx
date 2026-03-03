@@ -1,0 +1,288 @@
+---
+title: Environment Commands
+description: List notebooks and manage environments
+---
+
+Commands for listing open notebooks and inspecting their environments.
+
+## runt notebooks
+
+List all open notebooks with kernel and environment information.
+
+```bash
+runt notebooks [--json]
+```
+
+Alias: `runt ps`
+
+### Options
+
+<ParamField query="json" type="boolean" optional>
+  Output in JSON format
+</ParamField>
+
+### Example Output
+
+```
+$ runt notebooks
+╭──────────────────────────────────────┬────────┬──────────────┬────────┬───────╮
+│ NOTEBOOK                             │ KERNEL │ ENV          │ STATUS │ PEERS │
+├──────────────────────────────────────┼────────┼──────────────┼────────┼───────┤
+│ ~/notebooks/blobstore.ipynb          │ python │ uv:inline    │ idle   │ 1     │
+│ d4c441d3-d862-4ab0-afe6-ff9145cc2f3d │ python │ uv:prewarmed │ idle   │ 1     │
+│ ~/analysis/data.ipynb                │ deno   │ -            │ busy   │ 2     │
+╰──────────────────────────────────────┴────────┴──────────────┴────────┴───────╯
+```
+
+### Column Descriptions
+
+- **NOTEBOOK**: Notebook file path or UUID (for untitled notebooks)
+- **KERNEL**: Kernel type (python, deno, julia, etc.)
+- **ENV**: Environment source:
+  - `uv:inline` — Inline dependencies in notebook metadata
+  - `uv:pyproject` — Dependencies from `pyproject.toml`
+  - `uv:prewarmed` — Pool environment (UV backend)
+  - `conda:inline` — Inline conda dependencies
+  - `conda:env_yml` — Dependencies from `environment.yml`
+  - `conda:pixi` — Dependencies from `pixi.toml`
+  - `conda:prewarmed` — Pool environment (Conda backend)
+  - `-` — No environment (Deno kernels don't use env pools)
+- **STATUS**: Kernel execution state (idle, busy, starting)
+- **PEERS**: Number of connected clients (open windows/tabs)
+
+### JSON Output
+
+```bash
+$ runt notebooks --json
+```
+
+```json
+[
+  {
+    "notebook_id": "/Users/alice/notebooks/blobstore.ipynb",
+    "kernel_type": "python",
+    "kernel_status": "idle",
+    "env_source": "uv:inline",
+    "active_peers": 1,
+    "has_kernel": true
+  },
+  {
+    "notebook_id": "d4c441d3-d862-4ab0-afe6-ff9145cc2f3d",
+    "kernel_type": "python",
+    "kernel_status": "idle",
+    "env_source": "uv:prewarmed",
+    "active_peers": 1,
+    "has_kernel": true
+  }
+]
+```
+
+## runt shutdown
+
+Shutdown a notebook's kernel and evict it from the daemon.
+
+```bash
+runt shutdown <PATH>
+```
+
+### Arguments
+
+<ParamField path="PATH" type="string" required>
+  Notebook file path or notebook ID (UUID for untitled notebooks).
+  
+  - For saved notebooks: Use the file path (relative or absolute)
+  - For untitled notebooks: Use the UUID from `runt notebooks`
+</ParamField>
+
+### Examples
+
+#### Shutdown by file path
+
+```bash
+# Relative path
+$ runt shutdown analysis.ipynb
+Shutdown notebook: /Users/alice/notebooks/analysis.ipynb
+
+# Absolute path
+$ runt shutdown ~/notebooks/data.ipynb
+Shutdown notebook: /Users/alice/notebooks/data.ipynb
+```
+
+#### Shutdown untitled notebook
+
+```bash
+# First, list notebooks to get UUID
+$ runt notebooks
+╭──────────────────────────────────────┬────────┬──────────────┬────────┬───────╮
+│ NOTEBOOK                             │ KERNEL │ ENV          │ STATUS │ PEERS │
+├──────────────────────────────────────┼────────┼──────────────┼────────┼───────┤
+│ d4c441d3-d862-4ab0-afe6-ff9145cc2f3d │ python │ uv:prewarmed │ idle   │ 1     │
+╰──────────────────────────────────────┴────────┴──────────────┴────────┴───────╯
+
+# Then shutdown by UUID
+$ runt shutdown d4c441d3-d862-4ab0-afe6-ff9145cc2f3d
+Shutdown notebook: d4c441d3-d862-4ab0-afe6-ff9145cc2f3d
+```
+
+### What Happens on Shutdown
+
+1. **Kernel shutdown**: Graceful shutdown request sent to kernel process
+2. **Process termination**: Kernel process is killed if it doesn't exit
+3. **Room eviction**: Notebook room is removed from daemon state
+4. **Connection cleanup**: All peer connections are closed
+
+<Note>
+Shutting down a notebook does **not** close the notebook file in the app. It only stops the kernel and cleans up server-side state. The notebook can be reopened and will start a fresh kernel.
+</Note>
+
+## Environment Sources Explained
+
+### UV Environments
+
+<AccordionGroup>
+  <Accordion title="uv:inline">
+    Dependencies are stored directly in the notebook's metadata:
+    
+    ```json
+    {
+      "metadata": {
+        "runt": {
+          "uv": {
+            "dependencies": ["pandas", "matplotlib"]
+          }
+        }
+      }
+    }
+    ```
+    
+    Environments are cached at `~/.cache/runt/inline-envs/` by dependency hash.
+  </Accordion>
+  
+  <Accordion title="uv:pyproject">
+    Dependencies come from a `pyproject.toml` file in the notebook's directory or parent directories:
+    
+    ```toml
+    [project]
+    dependencies = ["pandas", "numpy"]
+    ```
+    
+    The daemon walks up from the notebook's directory to find the closest `pyproject.toml`.
+  </Accordion>
+  
+  <Accordion title="uv:prewarmed">
+    A prewarmed environment from the pool. The daemon maintains 2 ready-to-use UV environments with default packages.
+    
+    Default packages can be configured in Settings → Environments.
+  </Accordion>
+</AccordionGroup>
+
+### Conda Environments
+
+<AccordionGroup>
+  <Accordion title="conda:env_yml">
+    Dependencies from an `environment.yml` file:
+    
+    ```yaml
+    name: myenv
+    dependencies:
+      - python=3.11
+      - pandas
+      - numpy
+    ```
+  </Accordion>
+  
+  <Accordion title="conda:pixi">
+    Dependencies from a `pixi.toml` file:
+    
+    ```toml
+    [dependencies]
+    python = "3.11"
+    pandas = "*"
+    ```
+  </Accordion>
+  
+  <Accordion title="conda:prewarmed">
+    A prewarmed Conda environment from the pool. Similar to `uv:prewarmed` but uses Conda/Mamba.
+  </Accordion>
+  
+  <Accordion title="conda:inline">
+    Not yet implemented. Falls back to `conda:prewarmed`.
+  </Accordion>
+</AccordionGroup>
+
+## Use Cases
+
+### Monitor active notebooks
+
+```bash
+# Check what's running
+runt notebooks
+
+# Watch in real-time
+watch -n 5 runt notebooks
+```
+
+### Clean up idle notebooks
+
+```bash
+# List notebooks
+runt notebooks --json | jq -r '.[] | select(.kernel_status == "idle") | .notebook_id'
+
+# Shutdown idle notebooks
+for id in $(runt notebooks --json | jq -r '.[] | select(.kernel_status == "idle") | .notebook_id'); do
+  runt shutdown "$id"
+done
+```
+
+### Check environment sources
+
+```bash
+# See which notebooks use inline deps
+runt notebooks --json | jq '.[] | select(.env_source | startswith("uv:inline"))'
+
+# Count by env source
+runt notebooks --json | jq 'group_by(.env_source) | map({env: .[0].env_source, count: length})'
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No notebooks listed">
+    **Symptoms**: `runt notebooks` shows "No open notebooks"
+    
+    **Explanation**: This command only lists notebooks that are:
+    1. Currently open in the nteract app
+    2. Managed by the daemon
+    
+    If you haven't opened any notebooks in the app, the list will be empty.
+  </Accordion>
+  
+  <Accordion title="Daemon not running error">
+    **Error**: "Failed to list notebooks: ... Is the daemon running?"
+    
+    **Solution**:
+    ```bash
+    # Check daemon status
+    runt daemon status
+    
+    # Start if not running
+    runt daemon start
+    ```
+  </Accordion>
+  
+  <Accordion title="Notebook won't shutdown">
+    **Symptoms**: `runt shutdown` times out or notebook stays open
+    
+    **Solution**:
+    1. Check if the notebook is still open in the app
+    2. Close the notebook window in the app
+    3. Try shutting down again
+    4. As a last resort, restart the daemon: `runt daemon restart`
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+- `runt daemon status` — Check environment pool status
+- `runt daemon flush` — Rebuild prewarmed environments
+- `runt jupyter ps` — List standalone kernels (not managed by daemon)

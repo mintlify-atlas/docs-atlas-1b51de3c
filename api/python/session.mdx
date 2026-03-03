@@ -1,0 +1,449 @@
+---
+title: Session (Synchronous API)
+description: Synchronous session for executing code via the runtimed daemon
+---
+
+The `Session` class is the primary interface for executing code. Each session connects to a notebook room in the daemon.
+
+## Constructor
+
+```python
+Session(notebook_id=None)
+```
+
+<ParamField path="notebook_id" type="str" optional>
+  Unique identifier for this session. If not provided, a random UUID is generated.
+  Multiple `Session` objects with the same `notebook_id` will share the same kernel.
+</ParamField>
+
+<CodeGroup>
+
+```python Auto-generated ID
+session = runtimed.Session()
+print(session.notebook_id)  # "agent-session-a1b2c3d4-..."
+```
+
+```python Explicit ID
+session = runtimed.Session(notebook_id="my-notebook")
+print(session.notebook_id)  # "my-notebook"
+```
+
+</CodeGroup>
+
+## Properties
+
+<ResponseField name="notebook_id" type="str">
+  Unique identifier for this notebook session.
+</ResponseField>
+
+<ResponseField name="is_connected" type="bool">
+  Whether connected to the daemon.
+</ResponseField>
+
+<ResponseField name="kernel_started" type="bool">
+  Whether a kernel is running.
+</ResponseField>
+
+<ResponseField name="env_source" type="str | None">
+  Environment source (e.g., `"uv:prewarmed"`, `"conda:pyproject"`) if kernel is running.
+</ResponseField>
+
+## Connection Methods
+
+### connect()
+
+Connect to the daemon.
+
+```python
+session.connect()
+```
+
+<Info>
+This is called automatically by `start_kernel()` if not already connected.
+Respects the `RUNTIMED_SOCKET_PATH` environment variable if set.
+</Info>
+
+### start_kernel()
+
+Start a kernel for this session.
+
+```python
+session.start_kernel(
+    kernel_type="python",
+    env_source="auto",
+    notebook_path=None
+)
+```
+
+<ParamField path="kernel_type" type="str" default="python">
+  Type of kernel: `"python"` or `"deno"`.
+</ParamField>
+
+<ParamField path="env_source" type="str" default="auto">
+  Environment source. Options:
+  - `"auto"`: Auto-detect from inline deps or project files
+  - `"uv:prewarmed"`: Use prewarmed UV environment
+  - `"conda:prewarmed"`: Use prewarmed Conda environment
+  - For Deno kernels, this is ignored
+</ParamField>
+
+<ParamField path="notebook_path" type="str | None" optional>
+  Path to the notebook file on disk. Used for project file detection
+  (`pyproject.toml`, `pixi.toml`, `environment.yml`) when `env_source` is `"auto"`.
+</ParamField>
+
+<CodeGroup>
+
+```python Python Kernel
+session.start_kernel()  # Uses prewarmed Python environment
+```
+
+```python Deno Kernel
+session.start_kernel(kernel_type="deno")
+```
+
+```python With Project File
+session.start_kernel(
+    env_source="auto",
+    notebook_path="/path/to/notebook.ipynb"
+)
+```
+
+</CodeGroup>
+
+<Note>
+If a kernel is already running for this session's `notebook_id`, this returns immediately without starting a new one.
+</Note>
+
+### shutdown_kernel()
+
+Shutdown the kernel.
+
+```python
+session.shutdown_kernel()
+```
+
+### interrupt()
+
+Interrupt the currently executing cell.
+
+```python
+session.interrupt()
+```
+
+## Document Operations
+
+### create_cell()
+
+Create a new cell in the automerge document.
+
+```python
+cell_id = session.create_cell(
+    source="",
+    cell_type="code",
+    index=None
+)
+```
+
+<ParamField path="source" type="str" default="">
+  The cell source code.
+</ParamField>
+
+<ParamField path="cell_type" type="str" default="code">
+  Cell type: `"code"`, `"markdown"`, or `"raw"`.
+</ParamField>
+
+<ParamField path="index" type="int | None" optional>
+  Position to insert the cell. If not provided, appends at end.
+</ParamField>
+
+<ResponseField name="return" type="str">
+  The cell ID (e.g., `"cell-a1b2c3d4-..."`)
+</ResponseField>
+
+```python
+cell_id = session.create_cell("print('hello')")
+print(cell_id)  # "cell-a1b2c3d4-..."
+```
+
+### set_source()
+
+Update a cell's source in the automerge document.
+
+```python
+session.set_source(cell_id, source)
+```
+
+<ParamField path="cell_id" type="str" required>
+  The cell ID.
+</ParamField>
+
+<ParamField path="source" type="str" required>
+  The new source code.
+</ParamField>
+
+```python
+session.set_source(cell_id, "print('updated')")
+```
+
+### get_cell()
+
+Get a cell from the automerge document.
+
+```python
+cell = session.get_cell(cell_id)
+```
+
+<ParamField path="cell_id" type="str" required>
+  The cell ID.
+</ParamField>
+
+<ResponseField name="return" type="Cell">
+  Cell object with `id`, `cell_type`, `source`, and `execution_count` properties.
+</ResponseField>
+
+```python
+cell = session.get_cell(cell_id)
+print(cell.source)           # "print('hello')"
+print(cell.execution_count)  # 1 or None
+```
+
+**Raises:** `RuntimedError` if cell not found.
+
+### get_cells()
+
+Get all cells from the automerge document.
+
+```python
+cells = session.get_cells()
+```
+
+<ResponseField name="return" type="List[Cell]">
+  List of Cell objects.
+</ResponseField>
+
+```python
+cells = session.get_cells()
+for cell in cells:
+    print(f"{cell.id}: {cell.source[:30]}...")
+```
+
+### delete_cell()
+
+Delete a cell from the automerge document.
+
+```python
+session.delete_cell(cell_id)
+```
+
+<ParamField path="cell_id" type="str" required>
+  The cell ID to delete.
+</ParamField>
+
+```python
+session.delete_cell(cell_id)
+```
+
+## Execution Methods
+
+### execute_cell()
+
+Execute a cell by ID.
+
+```python
+result = session.execute_cell(
+    cell_id,
+    timeout_secs=60.0
+)
+```
+
+<ParamField path="cell_id" type="str" required>
+  The cell ID to execute.
+</ParamField>
+
+<ParamField path="timeout_secs" type="float" default={60.0}>
+  Maximum time to wait for execution.
+</ParamField>
+
+<ResponseField name="return" type="ExecutionResult">
+  Result with outputs, success status, and execution count.
+</ResponseField>
+
+<CodeGroup>
+
+```python Basic Execution
+cell_id = session.create_cell("x = 42")
+result = session.execute_cell(cell_id)
+print(result.success)         # True
+print(result.execution_count) # 1
+```
+
+```python With Timeout
+cell_id = session.create_cell("import time; time.sleep(10)")
+result = session.execute_cell(cell_id, timeout_secs=5.0)
+# Raises RuntimedError: Execution timed out after 5.0 seconds
+```
+
+</CodeGroup>
+
+<Info>
+The daemon reads the cell's source from the automerge document and executes it. This ensures all clients see the same code being executed.
+
+If a kernel isn't running yet, this will start one automatically.
+</Info>
+
+**Raises:** `RuntimedError` if not connected, cell not found, or timeout.
+
+### run()
+
+Convenience method: create a cell, execute it, and return the result.
+
+```python
+result = session.run(
+    code,
+    timeout_secs=60.0
+)
+```
+
+<ParamField path="code" type="str" required>
+  The code to execute.
+</ParamField>
+
+<ParamField path="timeout_secs" type="float" default={60.0}>
+  Maximum time to wait for execution.
+</ParamField>
+
+<ResponseField name="return" type="ExecutionResult">
+  Result with outputs, success status, and execution count.
+</ResponseField>
+
+```python
+result = session.run("print('hello')")
+print(result.stdout)  # "hello\n"
+print(result.success) # True
+```
+
+<Note>
+This is a shortcut that combines `create_cell()` and `execute_cell()`. The cell is written to the automerge document before execution, so other connected clients will see it.
+</Note>
+
+### queue_cell()
+
+Queue a cell for execution without waiting for the result.
+
+```python
+session.queue_cell(cell_id)
+```
+
+<ParamField path="cell_id" type="str" required>
+  The cell ID to execute.
+</ParamField>
+
+```python
+session.queue_cell(cell_id)
+# Execution happens in background
+# Poll for results later:
+cell = session.get_cell(cell_id)
+```
+
+**Raises:** `RuntimedError` if not connected or cell not found.
+
+## Metadata Operations
+
+### set_metadata()
+
+Set a metadata value in the automerge document.
+
+```python
+session.set_metadata(key, value)
+```
+
+<ParamField path="key" type="str" required>
+  The metadata key.
+</ParamField>
+
+<ParamField path="value" type="str" required>
+  The metadata value (typically JSON).
+</ParamField>
+
+```python
+import json
+metadata = {"kernelspec": {"name": "python3"}}
+session.set_metadata("notebook_metadata", json.dumps(metadata))
+```
+
+### get_metadata()
+
+Get a metadata value from the automerge document.
+
+```python
+value = session.get_metadata(key)
+```
+
+<ParamField path="key" type="str" required>
+  The metadata key.
+</ParamField>
+
+<ResponseField name="return" type="str | None">
+  The metadata value or `None` if not set.
+</ResponseField>
+
+```python
+value = session.get_metadata("notebook_metadata")
+if value:
+    metadata = json.loads(value)
+```
+
+## Context Manager
+
+Sessions work as context managers for automatic cleanup:
+
+```python
+with runtimed.Session() as session:
+    session.start_kernel()
+    cell_id = session.create_cell("1 + 1")
+    result = session.execute_cell(cell_id)
+# Kernel automatically shut down on exit
+```
+
+## Complete Example
+
+```python
+import runtimed
+
+# Create a session with context manager
+with runtimed.Session(notebook_id="my-notebook") as session:
+    # Start Python kernel
+    session.start_kernel()
+    print(f"Environment: {session.env_source}")  # "uv:prewarmed"
+    
+    # Create and execute cells
+    cell1 = session.create_cell("x = 42")
+    result1 = session.execute_cell(cell1)
+    print(f"Success: {result1.success}")  # True
+    
+    cell2 = session.create_cell("print(x)")
+    result2 = session.execute_cell(cell2)
+    print(f"Output: {result2.stdout}")  # "42\n"
+    
+    # List all cells
+    cells = session.get_cells()
+    print(f"Total cells: {len(cells)}")  # 2
+    
+    # Update and re-execute
+    session.set_source(cell1, "x = 100")
+    session.execute_cell(cell1)
+    result3 = session.execute_cell(cell2)
+    print(f"Updated output: {result3.stdout}")  # "100\n"
+```
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card title="AsyncSession" icon="bolt" href="/api/python/async-session">
+    Async version of Session
+  </Card>
+  <Card title="ExecutionResult" icon="chart-line" href="/api/python/execution-results">
+    Understanding execution results
+  </Card>
+</CardGroup>
