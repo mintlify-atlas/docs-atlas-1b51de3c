@@ -252,6 +252,51 @@ Would remove: ~/.local/share/jupyter/runtime/runt-kernel-old-kernel.json
 Dry run complete: 2 stale, 3 alive, 0 errors
 ```
 
+## runt jupyter sidecar
+
+Launch the sidecar output viewer for a running kernel.
+
+```bash
+runt jupyter sidecar <CONNECTION_FILE> [--quiet] [--dump FILE]
+```
+
+### Arguments
+
+<ParamField path="CONNECTION_FILE" type="string" required>
+  Path to a kernel connection file (e.g., `~/.local/share/jupyter/runtime/kernel-12345.json`)
+</ParamField>
+
+### Options
+
+<ParamField query="quiet" type="boolean" optional>
+  Suppress output messages
+</ParamField>
+
+<ParamField query="dump" type="string" optional>
+  Dump all Jupyter messages to a JSON file for debugging
+</ParamField>
+
+### Example
+
+```bash
+# Find a running kernel's connection file
+$ runt jupyter ps --verbose
+╭──────────────┬──────────┬────────┬───────┬───────┬───────┬──────┬────┬──────────────────────────────╮
+│ NAME         │ LANGUAGE │ STATUS │ SHELL │ IOPUB │ STDIN │ CTRL │ HB │ CONNECTION FILE              │
+├──────────────┼──────────┼────────┼───────┼───────┼───────┼──────┼────┼──────────────────────────────┤
+│ jovial-goat  │ python   │ alive  │ 52311 │ 52312 │ 52313 │ 5231 │ 52 │ ~/.../runt-kernel-jovial-... │
+╰──────────────┴──────────┴────────┴───────┴───────┴───────┴──────┴────┴──────────────────────────────╯
+
+# Launch sidecar viewer
+$ runt jupyter sidecar ~/.local/share/jupyter/runtime/runt-kernel-jovial-goat.json
+```
+
+The sidecar viewer displays kernel outputs (images, HTML, plots) in a native window. Useful for viewing rich outputs from console or script-based kernel interactions.
+
+<Note>
+The sidecar is primarily for debugging. For interactive notebook work, use the nteract Desktop app instead.
+</Note>
+
 ## Connection Files
 
 Standalone kernels create connection files at:
